@@ -648,10 +648,9 @@ refresh();
 int main(void){
 	//intialize desired angles, gains, U_trim, & open port ot xbee and imu
 	init();
-   
- start_motors();
+    	start_motors();
  	printf("past start motors");
-    configure_threads();
+    	configure_threads();
 	usleep(onesecond*4);
 	clear();
 	endwin();
