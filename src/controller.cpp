@@ -1,7 +1,7 @@
 #include "controller.h"
 //g++ controller.cpp vicon.cpp motor.cpp imu_inv.cpp logger.cpp -I /home/odroid/upenn_quad/include -lpthread -lncurses -lboost_system
 /*
-Copyright (c) <2015>, <University of Pennsylvania>                                                             
+Copyright (c) <2015>, <University of Pennsylvania:GRASP Lab>                                                             
 All rights reserved.
  
 Redistribution and use in source and binary forms, with or without

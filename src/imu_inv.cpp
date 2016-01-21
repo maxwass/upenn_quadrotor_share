@@ -3,7 +3,7 @@
 // g++ imu_inv.cpp logger.cpp -I /home/odroid/upenn_quad/include
 
 /*
-Copyright (c) <2015>, <University of Pennsylvania>
+Copyright (c) <2015>, <University of Pennsylvania:GRASP Lab>
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
