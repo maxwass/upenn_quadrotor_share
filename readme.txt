@@ -1,4 +1,4 @@
-/*
+
 Copyright (c) <2015>, <University of Pennsylvania: GRASP Lab>
 All rights reserved.
 
@@ -23,7 +23,6 @@ LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
 ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-*/
 
 
 
@@ -54,3 +53,7 @@ utility.cpp: houses common functions used by a few files above.
 ../include/data_structs.h: custom data structures used for abstraction.
 
 the directory send_joystick_data houses the functions necessary use the joystick for sending instructions to the quadrotor
+
+
+   //Misc
+to detect devices on the i2c bus (such as out motors), use the command: sudo i2cdetect -y 10.
