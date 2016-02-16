@@ -85,8 +85,8 @@ void logger::unwrap(Data_log d){
     this->format(d.imu);             myfile << ", ";
    // this->format(d.imu_error);       myfile << ", ";
     this->format(d.forces);          myfile << ", ";
-   // this->format(d.desired_angles); 
-	myfile << "\n";
+   this->format(d.desired_angles); 	
+   myfile << "\n";
 }
 
 template <typename num>
@@ -99,6 +99,7 @@ std::string s(ss.str());
 
 return s;
 }
+//time is outputted in micro_seconds
 void logger::format(Times t){
     myfile << (t.date_time) << ", " << num2str(1000*((double) t.delta.tv_sec + (t.delta.tv_nsec / 1000000000.0)));    
 }
@@ -120,13 +121,13 @@ void logger::format(int read_error){
     myfile <<  num2str(read_error);
 }
 void logger::format(State imu){
-    myfile <<  num2str(imu.theta) <<  ", " << num2str(imu.phi) << ", " << num2str(imu.psi) << ", " <<num2str(imu.theta_dot)<<  ", " <<num2str(imu.phi_dot)<< ", "<< num2str(imu.psi_dot);
+    myfile <<  num2str(imu.theta) <<  ", " << num2str(imu.phi) << ", " << num2str(imu.psi) << ", " <<num2str(imu.theta_dot)<<  ", " <<num2str(imu.phi_dot)<< ", "<< num2str(imu.psi_dot) << ", " << num2str(imu.succ_read);
 }
 void logger::format(Motor_forces mf){
     myfile << num2str(mf.motor_1) << ", " << num2str(mf.motor_2) << ", " << num2str(mf.motor_3) << ", " << num2str(mf.motor_4);
 }
 void logger::format(Angles a){
-    myfile << num2str(a.theta) << ", " << num2str(a.phi) << ", " << num2str(a.psi);
+    myfile << num2str(a.theta) << ", " << num2str(a.phi) << ", " << num2str(a.psi)  << ", " << num2str(a.succ_read);
 }
 
 

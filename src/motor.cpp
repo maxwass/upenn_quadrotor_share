@@ -29,6 +29,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 */
 
+
 #define MOTOR_PATH "/dev/i2c-10"
 
 int motor::open_i2c(void){

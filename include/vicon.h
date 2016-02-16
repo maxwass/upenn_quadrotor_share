@@ -1,3 +1,33 @@
+/*
+Copyright (c) <2015>, <University of Pennsylvania:GRASP Lab>                                                             
+All rights reserved.
+ 
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+   * Redistributions of source code must retain the above copyright
+     notice, this list of conditions and the following disclaimer.
+   * Redistributions in binary form must reproduce the above copyright
+     notice, this list of conditions and the following disclaimer in the
+      documentation and/or other materials provided with the distribution.
+    * Neither the name of the university of pennsylvania nor the
+      names of its contributors may be used to endorse or promote products
+      derived from this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
+ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL UNIVERSITY OF PENNSYLVANIA  BE LIABLE FOR ANY
+DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+(INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
+ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+*/
+
+
+
 //=================================
 // include guard
 #ifndef VICON_H
@@ -8,6 +38,7 @@
 #include "data_structs.h" // user defined structs (state, control_command,gains, desired_angles)
 //#include "Xbee.h"
 //#include "receiver.h"
+#include "utility.h"
 
 #include <pthread.h>
 #include <termios.h>
@@ -54,18 +85,34 @@
 #define STAT_EYE                0x80
 #define DISTANCE_CONT		    0x8f
 
-
+#define num_bytes_per_read 1
 
 void get_vicon_data(int port, Vicon& vicon_data);
 void get_joystick_data(int port, Angles& joystick_des_angles, float& joystick_thrust, float& flight_mode);
+int select_get_joystick_data(int port, Angles& joystick_des_angles, uint8_t& joystick_thrust, uint8_t& flight_mode);
+
 void unpack_vicon_data(Vicon& vicon_data, float arr[]);
 void unpack_joystick_data(Angles& joystick_des_angles, float& joystick_thrust, float& flight_mode, float arr[]);
+
+void select_unpack_joystick_data(Angles& joystick_des_angles, int8_t& joystick_thrust, int8_t& flight_mode, int8_t arr[]);
+void select_unpack_joystick_data(Angles& joystick_des_angles, uint8_t& joystick_thrust, uint8_t& flight_mode, uint8_t arr[]);
+
+int checksum(const int8_t arr[], int arr_length);
+int checksum(const uint8_t arr[], int arr_length);
+
+void s_print_raw_bytes(const int8_t arr[], int arr_length);
+void s_print_raw_bytes(const uint8_t arr[], int arr_length);
+
+void print_stats_joy(int a);
+void print_data_joy(const Angles& joystick_des_angles, int joystick_thrust, int flight_mode);
 
 Vicon filter_vicon_data(Vicon& new_v, Vicon& prev1_v, Vicon& prev2_v,Weights& weights);
 float filt(float new_data, float old_data, float old_old_data, Weights& weights);
 void pushback(Vicon& new_vicon, Vicon& old_vicon, Vicon& old_old_Vicon); 
 void display_vicon_data(const Vicon& vicon_data);
 int open_xbee_port();
+ int select_open_xbee_port(void);
+
 int recieve_data(int fd_xbee, float data_received[], int data_size);
 void xbee_init(void);
 

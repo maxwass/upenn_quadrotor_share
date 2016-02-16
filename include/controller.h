@@ -1,7 +1,37 @@
+
+/*
+Copyright (c) <2015>, <University of Pennsylvania:GRASP Lab>                                                             
+All rights reserved.
+ 
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+   * Redistributions of source code must retain the above copyright
+     notice, this list of conditions and the following disclaimer.
+   * Redistributions in binary form must reproduce the above copyright
+     notice, this list of conditions and the following disclaimer in the
+      documentation and/or other materials provided with the distribution.
+    * Neither the name of the university of pennsylvania nor the
+      names of its contributors may be used to endorse or promote products
+      derived from this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
+ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL UNIVERSITY OF PENNSYLVANIA  BE LIABLE FOR ANY
+DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+(INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
+ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+*/
+
 //=================================
 // include guard
 #ifndef CONTROLLER_H
 #define CONTROLLER_H
+
 
 //=================================
 // included dependencies
@@ -32,9 +62,14 @@
 #include <ncurses.h>
 #include <queue>
 #include <vector>
-
 #include <ctime>
 #include <iostream>
+
+//time utility change
+#include "utility.h"
+#define diff time_diff
+#define tv2float timespec2float
+//
 
 #define NUM_THREADS 3
 #define PI 3.14159265359
@@ -68,23 +103,23 @@ void display_on_off(bool& DISPLAY_RUN);
 State_Error error_vicon(State_Error& error, const Vicon& pos_filt, const Vicon& vel_filt, const Positions& desired_positions, const Times& times);
 void desired_angles_calc(Angles& desired_angles, const State_Error& error, const Gains& gains);
 State error_imu(const State& imu_data, const Angles& desired_angles);
-Control_command thrust(const State& imu_error, const State_Error& vicon_error, const Control_command& U_trim, const float joystick_thrust, const Gains& gains);
+Control_command thrust(const State& imu_error, const State_Error& vicon_error, const Control_command& U_trim, const int joystick_thrust, const Gains& gains);
 void set_forces(const Control_command& U, double Ct, double d);
 Vicon vicon_velocity(Vicon& current, Vicon& old);
 void log_data(const Times& times, const Vicon& new_vicon, const Vicon& new_vicon_vel, const Vicon& new_filt_vicon, const Vicon& new_filt_vicon_vel, const State_Error& vicon_error, const State& imu_data, const State& imu_error, const Angles& desired_angles);
-void display_info(const State& imu_data, const State_Error& vicon_error, const State& imu_error, const Control_command& U, const Vicon& vicon, const Vicon& vicon_filt, const Vicon& vicon_vel, const Vicon& vicon_vel_filt, const Angles& desired_angles, const float joystick_thrust, const float flight_mode, const Times& times, const Times& time_m);
+void display_info(const int suc_read,  const State& imu_data, const State_Error& vicon_error, const State& imu_error, const Control_command& U, const Vicon& vicon, const Vicon& vicon_filt, const Vicon& vicon_vel, const Vicon& vicon_vel_filt, const Angles& desired_angles, const int joystick_thrust, const int flight_mode, const Times& times, const Times& time_m);
 void configure_threads(void);
 
-
-double tv2float (const timespec& time){
-     return ((double) time.tv_sec + (time.tv_nsec / 1000000000.0));
-}
 void set_timespec(timespec& x, timespec& y){
 //set x to equal y
              x.tv_sec = y.tv_sec;
              x.tv_nsec = y.tv_nsec;
 }
 
+/*
+double tv2float (const timespec& time){
+     return ((double) time.tv_sec + (time.tv_nsec / 1000000000.0));
+}
 timespec diff(timespec start, timespec end){
      timespec temp;
      if ((end.tv_nsec-start.tv_nsec)<0) {
@@ -96,7 +131,7 @@ timespec diff(timespec start, timespec end){
      }
      return temp;
 }
-
+*/
 void time_calc(Times& times){
     //get current time, swap current and past, calc delta_t
     //printf("current time: %.8f  old time: %.8f  delta_t: %.8f\n", tv2float(times.current), tv2float(times.old), tv2float(times.delta));
@@ -129,14 +164,14 @@ void set_initial_times(Times& times){
 }
 
 void set_gains(Gains& gains){
-    gains.kp_theta = 21.0;
-    gains.kd_theta = 0.32;
+    gains.kp_theta = 19.0; //21.0;
+    gains.kd_theta = 0.33; //0.32;
      
-    gains.kp_phi = 21.0;
-    gains.kd_phi = 0.37;
+    gains.kp_phi = gains.kp_theta; //21.0;
+    gains.kd_phi = gains.kd_theta; //0.37;
      
-    gains.kp_psi = 0.0;//5.2;
-    gains.kd_psi = 0.0; //0.3; 
+    gains.kp_psi = 20;//5.2;
+    gains.kd_psi = 0.2;//0.3; 
  
     gains.kp_x = 19.5;
     gains.kd_x = 2.7;
@@ -149,6 +184,7 @@ void set_gains(Gains& gains){
     gains.kp_z = 12.0;
     gains.kd_z = 5.0;
     gains.ki_z = 5.0;
+
 }
 
 #endif 

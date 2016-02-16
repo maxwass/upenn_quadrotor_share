@@ -1,17 +1,17 @@
 #include "imu_inv.h"
 
-// g++ imu_inv.cpp logger.cpp -I /home/odroid/upenn_quad/include
+// g++ imu_inv.cpp logger.cpp utility.cpp -I /home/odroid/upenn_quad/include
 
 /*
-Copyright (c) <2015>, <University of Pennsylvania:GRASP Lab>
+Copyright (c) <2015>, <University of Pennsylvania:GRASP Lab>                                                             
 All rights reserved.
-
+ 
 Redistribution and use in source and binary forms, with or without
 modification, are permitted provided that the following conditions are met:
-    * Redistributions of source code must retain the above copyright
-      notice, this list of conditions and the following disclaimer.
-    * Redistributions in binary form must reproduce the above copyright
-      notice, this list of conditions and the following disclaimer in the
+   * Redistributions of source code must retain the above copyright
+     notice, this list of conditions and the following disclaimer.
+   * Redistributions in binary form must reproduce the above copyright
+     notice, this list of conditions and the following disclaimer in the
       documentation and/or other materials provided with the distribution.
     * Neither the name of the university of pennsylvania nor the
       names of its contributors may be used to endorse or promote products
@@ -27,10 +27,12 @@ LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
 ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
 */
 
-State gyro_bias;
-double sum=0;
+
+State gyro_bias = {0};
+
 fd_set read_fds;
 struct timeval no_timeout;
 double total_it=0;
@@ -45,7 +47,20 @@ timespec total_start;
 timespec total_current;
 double total_seconds, total_sum=0;
 
-bool stats_flag = 1;
+bool calibration_mode = 0;
+bool stats_flag = 0;
+bool disable_motors = 0;
+
+//for continuos psi
+int num_psi_rotations = 0;
+bool first_loop = true;
+State old_raw_psi;
+State new_raw_psi;
+
+//for imu value checking
+bool first_loop_check = true;
+State old_imu_check;
+
 
 int open_imu_ivn_port()
 {
@@ -109,7 +124,7 @@ int open_imu_ivn_port()
 
 void print_data(const State& imu_data)
 {
-    printf("theta: %f  phi: %f  psi: %f\n  theta_dot: %f  phi_dot: %f  psi_dot: %f\n\n", imu_data.theta, imu_data.theta, imu_data.psi, imu_data.theta_dot, imu_data.phi_dot, imu_data.psi_dot);
+    printf("theta: %f  phi: %f  psi: %f\n  theta_dot: %f  phi_dot: %f  psi_dot: %f\n\n", imu_data.theta, imu_data.phi, imu_data.psi, imu_data.theta_dot, imu_data.phi_dot, imu_data.psi_dot);
 
 }
 
@@ -119,28 +134,116 @@ int unpack_ivn_data(State& imu_data,  const unsigned char arr[]){
     //the cast to a float pointer takes the first four bytes in the array 'arr',
     //thus constructing a float
 
-	if(arr[0] == 0xbd){
 	float att_vel[3] = {0.0};
         att_vel[0]         = *(int32_t *)&arr[13]; //printf("att_vel 1: %i \n", att_vel[0]);
         att_vel[1]         = *(int32_t *)&arr[17]; //printf("att_vel 2: %i \n", att_vel[1]);
         att_vel[2]         = *(int32_t *)&arr[21]; //printf("att_vel 3: %i \n", att_vel[2]);
 
 	    imu_data.psi       = *(float *)&arr[1]; //printf("psi 1: %f \n", imu_data.psi);
-        imu_data.theta     = *(float *)&arr[5]; //printf("theta 1: %f \n", imu_data.theta);
+        imu_data.theta     = *(float *)&arr[5]; //printf("theta 1: %f \n", imu_data.theta)state2rawBytes(imu_data);
         imu_data.phi       = *(float *)&arr[9]; //printf("phi 1: %f \n", imu_data.phi);
-
+        
 	    imu_data.psi	   = saturate(imu_data.psi);
 	    imu_data.theta	   = saturate(imu_data.theta);
 	    imu_data.phi	   = saturate(imu_data.phi);
-
-	    imu_data.phi_dot   = saturate(-att_vel[1]/100*1.5) - gyro_bias.phi_dot	;
-        imu_data.theta_dot = saturate(-att_vel[0]/100*1.5) - gyro_bias.theta_dot;
-        imu_data.psi_dot   = saturate(-att_vel[2]/100*1.5) - gyro_bias.psi_dot; //printf("psi_dot: %f \n", imu_data.psi_dot);
-	return 1;}
-	else return 0;
+       
+        new_raw_psi.psi = imu_data.psi; 
+        imu_data.psi = make_psi_contin(); 
+       
+        if(!calibration_mode)
+        {
+                imu_data.phi_dot   = saturate(-att_vel[1]/100*1.5) - gyro_bias.phi_dot	;
+                imu_data.theta_dot = saturate(-att_vel[0]/100*1.5) - gyro_bias.theta_dot;
+                imu_data.psi_dot   = saturate(-att_vel[2]/100*1.5) - gyro_bias.psi_dot; //printf("psi_dot: %f \n", imu_data.psi_dot);
+                imu_data.psi       = imu_data.psi - gyro_bias.psi;
+	    }
+        else
+        {
+                imu_data.phi_dot   = saturate(-att_vel[1]/100*1.5);
+                imu_data.theta_dot = saturate(-att_vel[0]/100*1.5);
+                imu_data.psi_dot   = saturate(-att_vel[2]/100*1.5);
+                
+                //check for crazy values
+                imu_value_check(imu_data);
+        }
+        //cout << imu_data.phi << endl;
+        return 1;
+}
+float make_psi_contin(void){//State& old_raw_psi, State& new_raw_psi){
+        
+//on first loop through store the first value
+if(first_loop)
+{ 
+         old_raw_psi.psi = new_raw_psi.psi;
+         first_loop = !first_loop;
+         printf("IN FIRST LOOP, value psi: %f \n", old_raw_psi.psi);
 }
 
+//If psi is decreasing
+if( (old_raw_psi.psi <= 10.0) && (old_raw_psi.psi >= 0.0)  && (new_raw_psi.psi <= 360.0) && (new_raw_psi.psi >= 350.0))
+    {
+            num_psi_rotations--;
+    }
+//Else psi is increasing
+else if( (new_raw_psi.psi <= 10.0) && (new_raw_psi.psi >= 0.0) && (old_raw_psi.psi <= 360.0) && (old_raw_psi.psi >= 350.0))
+    {
+            num_psi_rotations++;
+    }
 
+float psi_to_return  = num_psi_rotations*360 + old_raw_psi.psi;
+//printf("output psi: %f, new raw psi: %f old_raw_psi: %f , num_rotations: %i\n", psi_to_return, new_raw_psi.psi, old_raw_psi.psi, num_psi_rotations);
+       
+old_raw_psi.psi = new_raw_psi.psi;
+
+return psi_to_return;
+
+}
+void imu_value_check(State& imu_data){
+    bool crazy_value = false;
+        if( (imu_data.theta > 10) || (imu_data.theta <  -10) )              crazy_value = true;
+        else if( (imu_data.phi > 10) || (imu_data.phi < -10) )              crazy_value = true;
+        else if( (imu_data.psi > 360) || (imu_data.psi < -360) )            crazy_value = true;
+        else if( (imu_data.theta_dot > 100) || (imu_data.theta_dot < -100) )crazy_value = true;
+        else if( (imu_data.phi_dot > 100) || (imu_data.phi_dot < -100) )    crazy_value = true;
+        else if( (imu_data.psi_dot > 100) || (imu_data.psi_dot < -100) )    crazy_value = true;
+
+    if(crazy_value) {
+            printf("\n\n\x1b[31mVALUE OUT OF NORMAL RANGE DURING IMU CALIBRATION:\x1b[0m");
+            print_data(imu_data);
+            state2rawBytes(imu_data);
+            printf("\n\x1bPaused for 5 seconds if you want to exit before start: motors will be disabled\x1b[0m");
+            printf("\n\n");
+            usleep(1000000*5);
+            disable_motors = 1;
+    }
+
+}
+
+int imu_check(const State& imu_data){
+        int crazy_value = 1;
+        int angle_cap = 360;
+        int gyro_cap = 1200;
+        
+        if( (imu_data.theta > angle_cap) || (imu_data.theta <  -angle_cap) )              crazy_value = -8;
+        else if( (imu_data.phi > angle_cap) || (imu_data.phi < -angle_cap) )              crazy_value = -9;
+        else if( (imu_data.psi > 2000) || (imu_data.psi < -2000) )                        crazy_value = -10;
+        else if( (imu_data.theta_dot > gyro_cap) || (imu_data.theta_dot < -gyro_cap) )    crazy_value = -11;
+        else if( (imu_data.phi_dot > gyro_cap) || (imu_data.phi_dot < -gyro_cap) )        crazy_value = -12;
+        else if( (imu_data.psi_dot > gyro_cap) || (imu_data.psi_dot < -gyro_cap) )        crazy_value = -13;
+    
+        return crazy_value;
+}
+/*
+int imu_deriv_check(const State& imu_data){
+        int crazy_value = 1;
+        int angle_deriv_cap = 360;
+        int gyro__deriv_cap = 1200;
+        
+        if(first_loop_check
+
+
+}
+*/
 template <typename T>
 T saturate(T imu_val) {
 //if (imu_val > 400)  imu_val = 0;
@@ -153,6 +256,12 @@ void print_raw_bytes(const unsigned char arr[], int arr_length){
         for(int i = 0; i < arr_length; i++) printf("%i : %04x ,", i, arr[i]);//(arr[i] == 0xbd));
         printf("\n\n\n");
 }
+void state2rawBytes(const State& imu_data){
+    printf("theta: %04x   phi: %04x  psi: %04x \n  theta_dot: %04x  phi_dot: %04x  psi_dot: %04x \n\n", (unsigned char) imu_data.theta, (unsigned char) imu_data.phi, (unsigned char) imu_data.psi, (unsigned char) imu_data.theta_dot, (unsigned char) imu_data.phi_dot, (unsigned char) imu_data.psi_dot);
+
+
+}
+
 void print_stats(int last_return){
 printf("Last Result: ");
 switch(last_return){
@@ -225,7 +334,7 @@ int get_imu_ivn_data(const int port, State& imu_data)
                            
                             //get current time, subtract from last start time, then reset start time => success
                             clock_gettime(CLOCK_REALTIME,&success_current);
-                            success_seconds = timespec2float(time_diff(success_start, success_current));
+                           success_seconds = timespec2float(time_diff(success_start, success_current));
                             clock_gettime(CLOCK_REALTIME,&success_start);
                             
                             //calc stats
@@ -245,58 +354,75 @@ int get_imu_ivn_data(const int port, State& imu_data)
             int result = read(port, &sensor_bytes2[0], ivn_imu_data_size);
             
             //print_raw_bytes(sensor_bytes2, ivn_imu_data_size);
-
-                if(unpack_ivn_data(imu_data, sensor_bytes2)) {
-                    a = 1;
+               
+                //check first and last byte
+                if((sensor_bytes2[0] == 0xbd) && (sensor_bytes2[25] == 0xff) ){
+                    unpack_ivn_data(imu_data, sensor_bytes2); 
+                    a = imu_check(imu_data);
                 }else{
                     if (result == -1) printf("get_imu_data: FAILED read from port \n");
-                    printf("\n\n\x1b[31mFIRST BYTE WRONG:FLUSHED PORT\x1b[0m\n\n");
+                    printf("\n\n\x1b[31mCHECK BYTES WRONG:FLUSHED PORT\x1b[0m\n\n");
                     tcflush(port, TCIFLUSH);
-                    a = -1;
+                    if(!(sensor_bytes2[0]== 0xbd))       {printf("FIRST BYTE WRONG%04x \x1b[0m\n\n", sensor_bytes2[0]); a=-5;} 
+                    else if(!(sensor_bytes2[25] == 0xff)) {printf("LAST BYTE WRONG%04x \x1b[0m\n\n", sensor_bytes2[25]); a=-6;}
+                    else a = -1;
                 }
          }        
     if(stats_flag) print_stats(a);
-
+    //print_data(imu_data);
+    imu_data.succ_read = a;
     return a;
 
 }
-void find_gyro_bias(const int port){
-
+int find_gyro_bias(const int port){
+    calibration_mode = 1;
 	int i = 0;
 
 	timespec start;
 	timespec current;
 	clock_gettime(CLOCK_REALTIME,&start);
 	clock_gettime(CLOCK_REALTIME,&current);
-
+    
 	double seconds = timespec2float(time_diff(start, current));
+    State imu_data = {0};
+    
+    while(seconds < 5) {
+        int suc_read = get_imu_ivn_data(port, imu_data);
+        if(stats_flag) printf("suc_read: %i !suc_read: %i \n",suc_read, !suc_read);
+        //suc_read: -1: first byte wrong or failed read()
+                  //-2: no file descriptors ready to read
+                  //-3: select() returned an error()
+                  // 1: file descriptor ready, successful read        
+                if(suc_read<0) ;//printf("printing old values\n \n \n \n \n \n");
+                else{
+                        gyro_bias.theta_dot += imu_data.theta_dot;
+                        gyro_bias.phi_dot   += imu_data.phi_dot;
+                        gyro_bias.psi_dot   += imu_data.psi_dot;
+                        gyro_bias.psi       += imu_data.psi;
+                        i++;
+                        if(stats_flag){ 
+                        printf("Seconds: %f\n", seconds);
+                        printf("gyro_reading	     :	theta_dot: %5.3f  phi_dot: %5.3f  psi_dot: %5.3f		  \n", imu_data.theta_dot, imu_data.phi_dot, imu_data.psi_dot);
+                        printf("gyro_bias (accum)    :  theta_dot: %5.3f  phi_dot: %5.3f  psi_dot: %5.3f   		  \n", gyro_bias.theta_dot, gyro_bias.phi_dot, gyro_bias.psi_dot);
+                        printf("gyro_bias (averaged) :  theta_dot: %5.3f  phi_dot: %5.3f  psi_dot: %5.3f  iterations: %i  \n\n", gyro_bias.theta_dot/i, gyro_bias.phi_dot/i, gyro_bias.psi_dot/i, i);
+                        printf("yaw (psi)_ave (averaged)_  :  psi:       %5.3f \n", gyro_bias.psi/i); 
+                        }
+                       //print_data(imu_data);
+                
+                }
+    clock_gettime(CLOCK_REALTIME,&current);
+    seconds = timespec2float(time_diff(start, current));
+    }
 
-   while( i < 700){
-	State imu_data;
+    calibration_mode = 0;
 
-	if(!get_imu_ivn_data(port, imu_data)){
-		printf("Failed read: first byte not right");}
-	else{
-		gyro_bias.theta_dot += imu_data.theta_dot;
-		gyro_bias.phi_dot   += imu_data.phi_dot;
-		gyro_bias.psi_dot   += imu_data.psi_dot;
-		i++;
-/*
-		printf("gyro_reading	     :	theta_dot: %5.3f  phi_dot: %5.3f  psi_dot: %5.3f		  \n", imu_data.theta_dot, imu_data.phi_dot, imu_data.psi_dot);
-		printf("gyro_bias (accum)    :  theta_dot: %5.3f  phi_dot: %5.3f  psi_dot: %5.3f   		  \n", gyro_bias.theta_dot, gyro_bias.phi_dot, gyro_bias.psi_dot);
-		printf("gyro_bias (averaged) :  theta_dot: %5.3f  phi_dot: %5.3f  psi_dot: %5.3f  iterations: %i  \n\n", gyro_bias.theta_dot/i, gyro_bias.phi_dot/i, gyro_bias.psi_dot/i, i);
-*/
-	}
-	
-	clock_gettime(CLOCK_REALTIME,&current);
-	seconds = timespec2float(time_diff(start, current));
-   }
-
-	gyro_bias.theta_dot	=   gyro_bias.theta_dot/i;
-	gyro_bias.phi_dot	=   gyro_bias.phi_dot/i;
-	gyro_bias.psi_dot	=   gyro_bias.psi_dot/i;
+    printf("gyro_bias (averaged) :  theta_dot: %5.3f  phi_dot: %5.3f  psi_dot: %5.3f  iterations: %i  \n\n", gyro_bias.theta_dot/i, gyro_bias.phi_dot/i, gyro_bias.psi_dot/i, i);
+    gyro_bias.theta_dot = gyro_bias.theta_dot/i;
+    gyro_bias.phi_dot   = gyro_bias.phi_dot/i;
+    gyro_bias.psi_dot   = gyro_bias.psi_dot/i;
+    gyro_bias.psi       = gyro_bias.psi/i;
+    return disable_motors;
 }
-
 /*
 int main (void)
 {
@@ -308,25 +434,38 @@ int main (void)
     // File descriptor for the port 
     int port = open_imu_ivn_port();
  
-   //find gyro bias
-   //find_gyro_bias(port); 
-
-   //instantiate imu_data ==> scope is over while loop. Same imu_data will be overwritten repeatedly
+    //find_gyro_bias(port); 
+    //usleep(1000000/2);
+   
+    //instantiate imu_data ==> scope is over while loop. Same imu_data will be overwritten repeatedly
     State imu_data;
-
 
     while(1)
     { 
 	//pull data from sensor and put into imu_data
 	int suc_read = get_imu_ivn_data(port, imu_data);
-	if(!suc_read) printf("failed read, printing old values\n \n \n \n \n \n");
-//	print_data(imu_data);
-/	d.imu = imu_data;
+	if(suc_read<0) ;//printf("No new data: printing old values\n \n \n \n");
+    if( suc_read < -7 ) {printf("BAD VALUE!!!!"); usleep(10000000);}
+    else
+    { 
+    print_data(imu_data);
+    //imu_value_check(imu_data);
+    }
+
+//	d.imu = imu_data;
 //	logger.log(d);
 	
     }
-   
-    
-    return 0;
+
+
+//for(uint8_t r = 0; r<20; r++){
+//uint8_t t = round((float)r/4);
+////t = round(t);
+//printf("r: %i r/4: %i \n",r, (uint8_t)t);
+//} 
+
+return 0;
+
+
 }
 */
