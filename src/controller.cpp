@@ -40,12 +40,12 @@ Gains gains= {0.0};
 Control_command U_trim = {0.0};
 
 bool SYSTEM_RUN = true;
-bool CONTROLLER_RUN = false;//true;
-bool ESTOP = true;//true;
+bool CONTROLLER_RUN = false;
+bool ESTOP = true;
 bool XConfig = true;
 bool AUTO_HEIGHT = false;
 bool DISPLAY_RUN = false;
-bool LOG_DATA = true;// true;
+bool LOG_DATA = true;
 int VICON_OR_JOY = 0; // 1 = VICON, 0 = JOYSTICK
 int i2cHandle, usb_imu_ivn, usb_xbee;
 uint16_t display_count=0;
@@ -54,6 +54,9 @@ std::string log_filename = "file.log";
 logger logger(log_filename, 1000, LOG_DATA);
 
 //create our motor objects - accesible from all threads
+//on this particular quadrotor the Body Frame is defined as follows:
+//+x is between motors (0x2b , 0x29), +y is between (0x29 , 0x2c), 
+//and by the right hand rule, +z is down.
 motor motor_1(1, 0x29); //0x2f
 motor motor_2(2, 0x2c); //0x2d
 motor motor_3(3, 0x2a); //0x30
@@ -78,7 +81,7 @@ void *control_stabilizer(void *thread_id){
     Vicon new_vicon_vel,      old_vicon_vel,      old_old_vicon_vel      = {0};
     Vicon new_filt_vicon_vel, old_filt_vicon_vel, old_old_filt_vicon_vel = {0};
 
-//for display
+
     State imu_error = {0};
     Control_command U = {0};
     Angles desired_angles = {0};
