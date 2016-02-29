@@ -54,6 +54,11 @@ utility.cpp: houses common functions used by a few files above.
 
 the directory send_joystick_data houses the functions necessary use the joystick for sending instructions to the quadrotor
 
+the directory 3dPrint contains .stl files in the "import2makerbot" directory and .makerbot files in the "makerbot_ready" directory. 
+1).stl files can be exported to the makerbot desktop software to customize the positioning and characteristics of the print. 
+2) .makerbot files are the product of the process just described and are ready to be exported onto the makerbot. 
+
+If one would like to change the percent infill, number of object printed, etc just follow step one and export the resulting .makerbot file to the makerbot.
 
    //Misc
 to detect devices on the i2c bus (such as out motors), use the command: sudo i2cdetect -y 10.
