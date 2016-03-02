@@ -1,5 +1,5 @@
 #include "controller.h"
-//g++ controller.cpp vicon.cpp motor.cpp imu_inv.cpp logger.cpp utility.cpp -I /home/odroid/upenn_quad/include -lpthread -lncurses -lboost_system
+//g++ controller.cpp vicon.cpp motor.cpp imu_inv.cpp logger.cpp utility.cpp -I ../include -lpthread -lncurses -lboost_system
 //initialize process-scoped data-structures
 
 /*

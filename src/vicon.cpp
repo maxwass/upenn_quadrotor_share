@@ -38,8 +38,6 @@ int select_usb_xbee_fd;
 //int num_bytes_per_read=1;
 int onesecond_v = 1000000/4;
 
-<<<<<<< HEAD
-=======
 int stats_flag_v = 0;
 fd_set read_fds_v;
 struct timeval no_timeout_v;
@@ -55,7 +53,6 @@ timespec total_start_v, total_current_v;
 double total_seconds_v, total_sum_v=0;
 
 int NUM_JOY_BYTES=9;
->>>>>>> origin/master
 using namespace std;
 
 void get_vicon_data(int port, Vicon& vicon_data)
@@ -74,8 +71,6 @@ float data_received[5] = {0.0};
 recieve_data(port, data_received,5);
 unpack_joystick_data(joystick_des_angles, joystick_thrust, flight_mode, data_received);
 }
-<<<<<<< HEAD
-=======
 
 int select_get_joystick_data(int port, Angles& joystick_des_angles, uint8_t& joystick_thrust, uint8_t& flight_mode)
 {
@@ -259,7 +254,6 @@ switch(a){
  printf("Succ: %f , Fail: %f , Succ Rate: %f \n\n", succ_v, fail_v, (succ_v/(succ_v+fail_v)));
 }
 
->>>>>>> origin/master
 void unpack_vicon_data(Vicon& vicon_data, float arr[]){
     //distributes data from the input buffer to the imu_data data structure
     //we make a char[] to recieve imu data (imu outputs byte by byte)
