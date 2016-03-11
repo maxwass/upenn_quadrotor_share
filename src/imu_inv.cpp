@@ -1,6 +1,6 @@
 #include "imu_inv.h"
 
-// g++ imu_inv.cpp logger.cpp utility.cpp -I /home/odroid/upenn_quad/include
+// g++ imu_inv.cpp logger.cpp utility.cpp -I ../include
 
 /*
 Copyright (c) <2015>, <University of Pennsylvania:GRASP Lab>                                                             
@@ -423,7 +423,7 @@ int find_gyro_bias(const int port){
     gyro_bias.psi       = gyro_bias.psi/i;
     return disable_motors;
 }
-/*
+
 int main (void)
 {
     //logging data
@@ -438,8 +438,8 @@ int main (void)
     //usleep(1000000/2);
    
     //instantiate imu_data ==> scope is over while loop. Same imu_data will be overwritten repeatedly
-    State imu_data;
-
+    State imu_data = {0.0};
+/*
     while(1)
     { 
 	//pull data from sensor and put into imu_data
@@ -456,16 +456,24 @@ int main (void)
 //	logger.log(d);
 	
     }
+*/
 
+while(1)
+{
+//stupid reading
+tcflush(port, TCIFLUSH);
+unsigned char sensor_bytes2[ivn_imu_data_size];
+read(port, &sensor_bytes2[0], ivn_imu_data_size);
+if((sensor_bytes2[0] == 0xbd) && (sensor_bytes2[25] == 0xff) )
+	{
+		unpack_ivn_data(imu_data, sensor_bytes2);
+	}
 
-//for(uint8_t r = 0; r<20; r++){
-//uint8_t t = round((float)r/4);
-////t = round(t);
-//printf("r: %i r/4: %i \n",r, (uint8_t)t);
-//} 
+print_data(imu_data);
+}
 
 return 0;
 
 
 }
-*/
+
