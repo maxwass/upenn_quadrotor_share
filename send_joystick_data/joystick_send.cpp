@@ -54,8 +54,8 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  #include <stdlib.h>
  #include <errno.h>
  #include <sys/time.h>
- #include "joystick_send.h"
- #include "Xbee.h"
+ #include "joystick_send.h"  // this file is in this folder
+ #include "Xbee.h"           // this file in in ../include
   /*
  18  * Ugly hack to work around failing compilation on systems that don't
  19  * yet populate new version of hidraw.h to userspace.
