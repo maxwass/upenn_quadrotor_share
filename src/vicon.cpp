@@ -97,7 +97,7 @@ if(stats_flag_v) {
    //get current time then  -> total_seconds_v = total_current_v - total_start_v
    //calc ave of all freq's -> total_sum_v     += new_freq
    clock_gettime(CLOCK_REALTIME,&total_current_v);
-   total_seconds_v = timespec2float(time_diff(total_start_v, total_current_v));
+   total_seconds_v = UTILITY::timespec2float(UTILITY::time_diff(total_start_v, total_current_v));
    total_sum_v += 1/total_seconds_v;
    fail_v++;    
   }    
@@ -109,7 +109,7 @@ else if(num_fds ==-1)  {
   if(stats_flag_v){
         //get current time, subtract last start time, reset start time in (beginning)  ==> total
         clock_gettime(CLOCK_REALTIME,&total_current_v);
-        total_seconds_v = timespec2float(time_diff(total_start_v, total_current_v));
+        total_seconds_v = UTILITY::timespec2float(UTILITY::time_diff(total_start_v, total_current_v));
         //calc stats
         fail_v++;                                                               
         total_sum_v += 1/total_seconds_v;
@@ -117,7 +117,8 @@ else if(num_fds ==-1)  {
 a = -3;        
 }              
 //3) A file descriptor is ready to read: check which one
-else if(FD_ISSET(port , &read_fds_v)) {
+else if(FD_ISSET(port , &read_fds_v)) 
+{
  //flush input buffer (TCI for input)
  //tcflush(port, TCIFLUSH);
  
@@ -178,11 +179,11 @@ else if(FD_ISSET(port , &read_fds_v)) {
                 if(stats_flag_v) {
                         //get current time, subtract last start time, reset start time in (beginning)  ==> total
                          clock_gettime(CLOCK_REALTIME,&total_current_v);
-                         total_seconds_v = timespec2float(time_diff(total_start_v, total_current_v));
+                         total_seconds_v = UTILITY::timespec2float(UTILITY::time_diff(total_start_v, total_current_v));
                          
                          //get current time, subtract from last start time, then reset start time => success
                          clock_gettime(CLOCK_REALTIME,&success_current_v);
-                         success_seconds_v = timespec2float(time_diff(success_start_v, success_current_v));
+                         success_seconds_v = UTILITY::timespec2float(UTILITY::time_diff(success_start_v, success_current_v));
                          clock_gettime(CLOCK_REALTIME,&success_start_v);
                          
                          //calc stats

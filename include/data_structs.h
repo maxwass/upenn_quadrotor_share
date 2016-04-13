@@ -38,11 +38,18 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <time.h> // for struct timeval
 #include <string>
 
+//cal = calibrated, contin = continuous
 typedef struct state {
-float theta, phi, psi, theta_dot, phi_dot, psi_dot;
+float theta, phi, psi, psi_contin, theta_dot, phi_dot, psi_dot;
+float psi_cal, psi_contin_cal, theta_dot_cal, phi_dot_cal, psi_dot_cal;
+float psi_gyro_integration, psi_gyro_integration_cal;
 int succ_read;
+float dt;
+float numPsiRot;
+
 } State ;
- 
+
+
 typedef struct angles {
 float theta, phi, psi;
 int succ_read;

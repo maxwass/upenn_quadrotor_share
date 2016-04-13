@@ -1,5 +1,5 @@
 #include "controller.h"
-//g++ controller.cpp vicon.cpp motor.cpp imu_inv.cpp logger.cpp utility.cpp -I ../include -lpthread -lncurses -lboost_system
+//g++ controller.cpp imu.cpp vicon.cpp motor.cpp logger.cpp utility.cpp -I ../include -lpthread -lncurses -lboost_system -std=c++11
 //initialize process-scoped data-structures
 
 /*
@@ -37,21 +37,22 @@ Times times_display;
 Positions init_positions = {0.0};
 Positions desired_positions = {0.0};
 Gains gains= {0.0};
-Control_command U_trim = {0.0};
+Control_command U_trim = {0};
 
+bool MAGN = false;
 bool SYSTEM_RUN = true;
 bool CONTROLLER_RUN = false;
 bool ESTOP = true;
 bool XConfig = true;
 bool AUTO_HEIGHT = false;
 bool DISPLAY_RUN = false;
-bool LOG_DATA = true;
+bool LOG_DATA = false;
 int VICON_OR_JOY = 0; // 1 = VICON, 0 = JOYSTICK
 int i2cHandle, usb_imu_ivn, usb_xbee;
 uint16_t display_count=0;
 
 std::string log_filename = "file.log";
-logger logger(log_filename, 1000, LOG_DATA);
+logger logger(log_filename, 100, LOG_DATA);
 
 //create our motor objects - accesible from all threads
 //on this particular quadrotor the Body Frame is defined as follows:
@@ -61,6 +62,9 @@ motor motor_1(1, 0x29); //0x2f
 motor motor_2(2, 0x2c); //0x2d
 motor motor_3(3, 0x2a); //0x30
 motor motor_4(4, 0x2b); //0x2e
+
+std::string path = "/dev/ttyACM0";
+Imu imu(path, 26, .007);
 
 void *control_stabilizer(void *thread_id){
  
@@ -90,71 +94,80 @@ void *control_stabilizer(void *thread_id){
     int new_xbee_data;
     int new_imu_data;
     times.delta.tv_nsec = 500000;
-    while(SYSTEM_RUN) {
-        //calc new times and delta
-        //time_calc(times);    
-        
-        time_calc(times_display);
+while(SYSTEM_RUN) 
+{
+	//calc new times and delta
+	//time_calc(times);    
 
-        //reads input from imu (in degrees), distributes into fields of imu_dataa
+	time_calc(times_display);
+
+	//reads input from imu (in degrees), distributes into fields of imu_dataa
 	//get_imu_inv returns >0 if read successful,< 0 if not. Reuse old values if not successful
-	int new_imu_data =  get_imu_ivn_data(usb_imu_ivn, imu_data);
-    if(new_imu_data < 0); //printf("imu not ready to read: old data");
+	int new_imu_data =  imu.get_imu_calibrated_data(imu_data); 
 
-   if (VICON_OR_JOY == 1){
-        printf("in vicon part");
-        //get_vicon_data(usb_xbee, new_vicon);
+	//can switch between psi estimators
+	if(!MAGN) imu_data.psi = imu_data.psi_gyro_integration;
 
-        new_filt_vicon = filter_vicon_data(new_vicon, old_vicon, old_old_vicon, weights);
+	if (VICON_OR_JOY == 1)
+	{
+		printf("in vicon part");
+		//get_vicon_data(usb_xbee, new_vicon);
 
-        //calc velocities from vicon
-        new_vicon_vel = vicon_velocity(new_filt_vicon, old_filt_vicon);
-        //filter velocities
-        new_filt_vicon_vel = filter_vicon_data(new_vicon_vel, old_vicon_vel, old_old_vicon_vel, weights);       
+		new_filt_vicon = filter_vicon_data(new_vicon, old_vicon, old_old_vicon, weights);
 
-        //set old_old data to old_data, and old_data to new data
-        //vicon data
-        pushback(new_vicon,      old_vicon,      old_old_vicon);
-        pushback(new_filt_vicon, old_filt_vicon, old_old_filt_vicon);
+		//calc velocities from vicon
+		new_vicon_vel = vicon_velocity(new_filt_vicon, old_filt_vicon);
+		//filter velocities
+		new_filt_vicon_vel = filter_vicon_data(new_vicon_vel, old_vicon_vel, old_old_vicon_vel, weights);       
 
-        //calculated vicon velocities
-        pushback(new_vicon_vel,      old_vicon_vel,      old_old_vicon_vel);
-        pushback(new_filt_vicon_vel, old_filt_vicon_vel, old_old_filt_vicon_vel);
+		//set old_old data to old_data, and old_data to new data
+		//vicon data
+		pushback(new_vicon,      old_vicon,      old_old_vicon);
+		pushback(new_filt_vicon, old_filt_vicon, old_old_filt_vicon);
 
-        //calculate error from vicon
-        error_vicon(vicon_error, new_filt_vicon, new_filt_vicon_vel, desired_positions,times);	
+		//calculated vicon velocities
+		pushback(new_vicon_vel,      old_vicon_vel,      old_old_vicon_vel);
+		pushback(new_filt_vicon_vel, old_filt_vicon_vel, old_old_filt_vicon_vel);
 
-        //calculate desired attitude (phi theta phi) in desired_angles
-        desired_angles_calc(desired_angles, vicon_error, gains);
-    }	
-    else{
-        Angles old_desired_angles = desired_angles;
-        //get joystick data => desired angles
-        new_xbee_data = select_get_joystick_data(usb_xbee, desired_angles, joystick_thrust, flight_mode);
+		//calculate error from vicon
+		error_vicon(vicon_error, new_filt_vicon, new_filt_vicon_vel, desired_positions,times);	
 
-        if(new_xbee_data < 0) ; //printf("joystick not ready to read: old data");
-        //check flight mode
-            if(ESTOP)
-            {
-                    if(flight_mode < 11.0) {printf("FLIGHT MODE: OFF %i \n", flight_mode); CONTROLLER_RUN = false;}
-                    else if (flight_mode > 15.0 && flight_mode < 17.0) AUTO_HEIGHT = false;
-                    else if (flight_mode > 17.0) AUTO_HEIGHT = true;
-            }
-        }
+		//calculate desired attitude (phi theta phi) in desired_angles
+		desired_angles_calc(desired_angles, vicon_error, gains);
+	}	
+	else
+	{
+		Angles old_desired_angles = desired_angles;
+		//get joystick data => desired angles
+		new_xbee_data = select_get_joystick_data(usb_xbee, desired_angles, joystick_thrust, flight_mode);
+
+		if(new_xbee_data < 0) ; //printf("joystick not ready to read: old data");
+		//check flight mode
+		    if(ESTOP)
+		    {
+			    if(flight_mode < 11.0) {printf("FLIGHT MODE: OFF %i \n", flight_mode); CONTROLLER_RUN = false;}
+			    else if (flight_mode > 15.0 && flight_mode < 17.0) AUTO_HEIGHT = false;
+			    else if (flight_mode > 17.0) AUTO_HEIGHT = true;
+		    }
+	}
 	    //calculate error from imu (in radians) between desired and measured state
-        State imu_error = error_imu(imu_data, desired_angles);
-     
-        //calculate thrust and desired acceleration
-        U = thrust(imu_error,vicon_error, U_trim, joystick_thrust, gains);
-        
-        //calculate the forces of each motor and change force on motor objects
-          // and send via i2c 
-        set_forces(U,Ct,d);
-       if (LOG_DATA && ( (new_xbee_data>0) || (new_imu_data>0) ) )    { log_data(times_display, new_vicon, new_vicon_vel, new_filt_vicon, new_filt_vicon_vel, vicon_error, imu_data, imu_error, desired_angles);        }
-       if (DISPLAY_RUN) { display_info(new_xbee_data,  imu_data, vicon_error, imu_error, U, new_vicon, new_filt_vicon, new_vicon_vel, new_filt_vicon_vel, desired_angles,joystick_thrust, flight_mode, times_display, time_m); }
-  //cout << "after 3 call in controller: " << imu_data.phi << endl;
-    
-    }
+	State imu_error = error_imu(imu_data, desired_angles);
+
+	//calculate thrust and desired acceleration
+	U = thrust(imu_error,vicon_error, U_trim, joystick_thrust, gains);
+
+	//calculate the forces of each motor and change force on motor objects and send via i2c 
+	set_forces(U,Ct,d);
+       if (LOG_DATA && ( (new_xbee_data>0) || (new_imu_data>0) ) )    
+	{ 
+	log_data(times_display, new_vicon, new_vicon_vel, new_filt_vicon, new_filt_vicon_vel, vicon_error, imu_data, imu_error, desired_angles);
+	}
+       if (DISPLAY_RUN) 
+	{ 
+	display_info(new_xbee_data,  imu_data, vicon_error, imu_error, U, new_vicon, new_filt_vicon, new_vicon_vel, new_filt_vicon_vel, desired_angles,joystick_thrust, flight_mode, times_display, time_m); 
+	}
+
+}
  
     printf("EXIT CONTROL_STABILIZER\n");
     pthread_exit(NULL);
@@ -449,7 +462,8 @@ void *command_input(void *thread_id){
     unsigned char command;
     string input;
 
-    while(SYSTEM_RUN) {
+    while(SYSTEM_RUN) 
+{
 	    printf("    please give input for command_input: ");
         //command = getchar(); 
         //getline(cin, input);
@@ -703,18 +717,10 @@ void init(void){
     //ncurses
     initscr();
 
-    printf("opening usb port for imu...\n");
-    refresh();
-    usb_imu_ivn = open_imu_ivn_port();
-     if (usb_imu_ivn > 0)
-        printf("Done!\n");
-     else printf("Fail to open usb port!\n");
-	refresh();
-
    //finds bias in gyro and checks for out of range imu values. returns 1 if bad imu values.
    printf("finding gyro bias...\n");  
    refresh();
-   if(find_gyro_bias(usb_imu_ivn) == 0) ;
+   if(imu.calibrate() == 1) ;
    else CONTROLLER_RUN = false;
    refresh();
    
@@ -762,7 +768,7 @@ void init(void){
                  else f++;
 
          }
-    float elapsed_time = timespec2float(time_diff(start_joy,current_joy));
+    float elapsed_time = UTILITY::timespec2float(UTILITY::time_diff(start_joy,current_joy));
     //printf("elapsed time: %f\n", elapsed_time);
     //refresh();
 

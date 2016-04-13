@@ -33,6 +33,8 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 // Member functions definitions including constructor
 logger::logger(string filename, int cycles_until_log, bool LOG_DATA)
 {
+	first_loop = true;	
+
 	//when queue gets larget than this, will flush all
 	max_queue_length = cycles_until_log; 
     	
@@ -75,7 +77,19 @@ void logger::write_to_file( void )
 }
 
 void logger::unwrap(Data_log d){
-    this->format(d.time);            myfile << ", ";    
+
+if(first_loop)
+{
+//imu
+	myfile <<  "theta" <<  ", " << "phi" << ", " << "psi_magnet" << ", "  << "psi_gyro_integ" << ", "<< "theta_dot" <<  ", " << "phi_dot" << ", "<< "psi_dot" << ", " << "dt" << ", " << "numPsiRot"<< ", ";
+//motor	
+	myfile <<  "m1" <<  ", " << "m2" <<  ", " << "m3" <<  ", " << "m4" <<  ", ";        
+//desired angles
+	myfile <<  "theta_des" <<  ", " << "phi_des" <<  ", " << "psi_des" <<  ", ";
+ 
+	myfile << "\n";
+}
+   //this->format(d.time);            myfile << ", ";    
    // this->format(d.vicon_data);      myfile << ", ";
    // this->format(d.vicon_data_filt); myfile << ", "; 
    // this->format(d.vicon_vel);       myfile << ", "; 
@@ -87,6 +101,7 @@ void logger::unwrap(Data_log d){
     this->format(d.forces);          myfile << ", ";
    this->format(d.desired_angles); 	
    myfile << "\n";
+   first_loop = false;
 }
 
 template <typename num>
@@ -121,13 +136,13 @@ void logger::format(int read_error){
     myfile <<  num2str(read_error);
 }
 void logger::format(State imu){
-    myfile <<  num2str(imu.theta) <<  ", " << num2str(imu.phi) << ", " << num2str(imu.psi) << ", " <<num2str(imu.theta_dot)<<  ", " <<num2str(imu.phi_dot)<< ", "<< num2str(imu.psi_dot) << ", " << num2str(imu.succ_read);
+    myfile <<  num2str(imu.theta) <<  ", " << num2str(imu.phi) << ", " << num2str(imu.psi) << ", "  << num2str(imu.psi_gyro_integration) << ", "<<num2str(imu.theta_dot)<<  ", " <<num2str(imu.phi_dot)<< ", "<< num2str(imu.psi_dot) << ", " << num2str(100000*imu.dt)<< ", " << num2str(imu.numPsiRot);
 }
 void logger::format(Motor_forces mf){
     myfile << num2str(mf.motor_1) << ", " << num2str(mf.motor_2) << ", " << num2str(mf.motor_3) << ", " << num2str(mf.motor_4);
 }
 void logger::format(Angles a){
-    myfile << num2str(a.theta) << ", " << num2str(a.phi) << ", " << num2str(a.psi)  << ", " << num2str(a.succ_read);
+    myfile << num2str(a.theta) << ", " << num2str(a.phi) << ", " << num2str(a.psi);
 }
 
 

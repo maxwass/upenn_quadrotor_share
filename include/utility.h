@@ -45,5 +45,41 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 timespec time_diff(timespec start, timespec end);                                                                                                                         
 double timespec2float (const timespec& time);
+
+
+class UTILITY{
+        public:
+        static timespec time_diff(timespec start, timespec end)
+        {
+                timespec temp;
+                if ((end.tv_nsec-start.tv_nsec)<0)
+                {
+                   temp.tv_sec = end.tv_sec-start.tv_sec-1;
+                   temp.tv_nsec = 1000000000+end.tv_nsec-start.tv_nsec;
+                }
+                else
+                {
+                    temp.tv_sec = end.tv_sec-start.tv_sec;
+                    temp.tv_nsec = end.tv_nsec-start.tv_nsec;
+                }
+                return temp;
+        } 
+         
+        static double timespec2float (const timespec& time)
+        {
+                return ((double) time.tv_sec + (time.tv_nsec / 1000000000.0));
+        }
+
+};  
+
+
+
+
+
+
+
+
+
+
 #endif   
 

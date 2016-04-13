@@ -434,12 +434,12 @@ int main (void)
     // File descriptor for the port 
     int port = open_imu_ivn_port();
  
-    //find_gyro_bias(port); 
+    find_gyro_bias(port); 
     //usleep(1000000/2);
    
     //instantiate imu_data ==> scope is over while loop. Same imu_data will be overwritten repeatedly
     State imu_data = {0.0};
-/*
+
     while(1)
     { 
 	//pull data from sensor and put into imu_data
@@ -456,21 +456,6 @@ int main (void)
 //	logger.log(d);
 	
     }
-*/
-
-while(1)
-{
-//stupid reading
-tcflush(port, TCIFLUSH);
-unsigned char sensor_bytes2[ivn_imu_data_size];
-read(port, &sensor_bytes2[0], ivn_imu_data_size);
-if((sensor_bytes2[0] == 0xbd) && (sensor_bytes2[25] == 0xff) )
-	{
-		unpack_ivn_data(imu_data, sensor_bytes2);
-	}
-
-print_data(imu_data);
-}
 
 return 0;
 

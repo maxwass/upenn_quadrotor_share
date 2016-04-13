@@ -36,12 +36,13 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 //=================================
 // included dependencies
 #include "motor.h"   //#include because controller contains a motor object
-//#include "imu_spark.h" //if there are problems with sparkfun imu, i havent tested with new file name
-#include "imu_inv.h"
+//#include "imu_inv.h"
 #include "data_structs.h" // user defined structs (state, control_command,gains, desired_angles)
 
 #include "vicon.h" // change to xbee.h
 #include "logger.h"
+#include "imu.h"
+#include "utility.h"
 
 
 #include <pthread.h>
@@ -66,7 +67,6 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <iostream>
 
 //time utility change
-#include "utility.h"
 #define diff time_diff
 #define tv2float timespec2float
 //
@@ -87,6 +87,7 @@ int signal_frequency = onesecond/frequency;
 float delta_position = 0.1;
 int max_thrust = 460;
 int delta_thrust = 30;
+float delta_time = 500000; // .5 ms
 //The address of i2c: {between +X/+Y, -X/+Y, -X/-Y, +X/-Y}                                                                                                                           
 //int address[4] = {0x2b, 0x2a, 0x2c, 0x29};
 int address[4] = {0x2e, 0x30, 0x2d, 0x2f};// this is not correct
@@ -116,22 +117,7 @@ void set_timespec(timespec& x, timespec& y){
              x.tv_nsec = y.tv_nsec;
 }
 
-/*
-double tv2float (const timespec& time){
-     return ((double) time.tv_sec + (time.tv_nsec / 1000000000.0));
-}
-timespec diff(timespec start, timespec end){
-     timespec temp;
-     if ((end.tv_nsec-start.tv_nsec)<0) {
-         temp.tv_sec = end.tv_sec-start.tv_sec-1;
-         temp.tv_nsec = 1000000000+end.tv_nsec-start.tv_nsec;
-     } else {  
-         temp.tv_sec = end.tv_sec-start.tv_sec;
-         temp.tv_nsec = end.tv_nsec-start.tv_nsec;
-     }
-     return temp;
-}
-*/
+
 void time_calc(Times& times){
     //get current time, swap current and past, calc delta_t
     //printf("current time: %.8f  old time: %.8f  delta_t: %.8f\n", tv2float(times.current), tv2float(times.old), tv2float(times.delta));

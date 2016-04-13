@@ -58,11 +58,15 @@ using namespace std;
 class logger
 {
    private:
+    
     ofstream myfile;
     std::queue<Data_log> q;
     int max_queue_length;
     std::string filename;
+    bool first_loop;
     const char *filename_p;
+      
+
     void unwrap(Data_log d);
     void format(Vicon v);
     void format(Times t);

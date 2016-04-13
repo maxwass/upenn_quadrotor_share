@@ -27,8 +27,7 @@ ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 */
-
-  
+ 
 timespec time_diff(timespec start, timespec end){
         timespec temp;
         if ((end.tv_nsec-start.tv_nsec)<0) {
