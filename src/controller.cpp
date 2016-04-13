@@ -46,13 +46,13 @@ bool ESTOP = true;
 bool XConfig = true;
 bool AUTO_HEIGHT = false;
 bool DISPLAY_RUN = false;
-bool LOG_DATA = false;
+bool LOG_DATA = true;
 int VICON_OR_JOY = 0; // 1 = VICON, 0 = JOYSTICK
 int i2cHandle, usb_imu_ivn, usb_xbee;
 uint16_t display_count=0;
 
 std::string log_filename = "file.log";
-logger logger(log_filename, 100, LOG_DATA);
+logger logger(log_filename, 20, LOG_DATA);
 
 //create our motor objects - accesible from all threads
 //on this particular quadrotor the Body Frame is defined as follows:
@@ -62,6 +62,7 @@ motor motor_1(1, 0x29); //0x2f
 motor motor_2(2, 0x2c); //0x2d
 motor motor_3(3, 0x2a); //0x30
 motor motor_4(4, 0x2b); //0x2e
+
 
 std::string path = "/dev/ttyACM0";
 Imu imu(path, 26, .007);
@@ -378,7 +379,8 @@ void display_info(const int succ_read,  const State& imu_data, const State_Error
         printf("Last read success? %i \n", imu_data.succ_read);
         printf("phi:   %7.2f         phi dot:   %7.2f \n",imu_data.phi, imu_data.phi_dot);//, imu_data.phi, imu_data.phi_dot);
         printf("theta: %7.2f         theta dot: %7.2f\n",imu_data.theta, imu_data.theta_dot);
-        printf("psi:   %7.2f         psi dot:   %7.2f\n\n",imu_data.psi, imu_data.psi_dot);
+	printf("psi:   %7.2f         psi dot:   %7.2f    psi uncal:   %7.2f\n\n",imu_data.psi, imu_data.psi_dot, imu_data.psi_contin);
+
 /*
    
 	printf("        VICON DATA                                                          FILTERED VICON DATA   \n");
