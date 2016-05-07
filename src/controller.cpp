@@ -1,5 +1,5 @@
-#include "controller.h"
-//g++ controller.cpp imu.cpp vicon.cpp motor.cpp logger.cpp utility.cpp -I ../include -lpthread -lncurses -lboost_system -std=c++11
+ #include "controller.h"
+//g++ controller.cpp imu.cpp sonar.cpp xbee1.cpp vicon.cpp motor.cpp logger.cpp utility.cpp -I ../include -lpthread -lncurses -lboost_system -std=c++11
 //initialize process-scoped data-structures
 
 /*
@@ -45,33 +45,55 @@ bool CONTROLLER_RUN = false;
 bool ESTOP = true;
 bool XConfig = true;
 bool AUTO_HEIGHT = false;
-bool DISPLAY_RUN = false;
+bool DISPLAY_RUN = true;
 bool LOG_DATA = true;
 int VICON_OR_JOY = 0; // 1 = VICON, 0 = JOYSTICK
 int i2cHandle, usb_imu_ivn, usb_xbee;
 uint16_t display_count=0;
+bool SONAR_BUBBLE = true;
+int repulsion_factor = 15;
+int minDist = 500;
+int maxDist = 2000;
+
+int aa = 0;
+timespec s,f;
+timespec dd,tt;
+int port;
 
 std::string log_filename = "file.log";
-logger logger(log_filename, 20, LOG_DATA);
+logger logger(log_filename, 10, LOG_DATA);
 
 //create our motor objects - accesible from all threads
-//on this particular quadrotor the Body Frame is defined as follows:
-//+x is between motors (0x2b , 0x29), +y is between (0x29 , 0x2c), 
-//and by the right hand rule, +z is down.
 motor motor_1(1, 0x29); //0x2f
 motor motor_2(2, 0x2c); //0x2d
 motor motor_3(3, 0x2a); //0x30
 motor motor_4(4, 0x2b); //0x2e
 
+SonarTest x_pos ={0}, x_neg ={0}, y_pos ={0}, y_neg ={0}; 
+
+Sonar sonar_x_pos("/dev/ttyUSB1");
+Sonar sonar_x_neg("/dev/ttyUSB2");
+Sonar sonar_y_pos("/dev/ttyUSB0");
+Sonar sonar_y_neg("/dev/ttyUSB4");
 
 std::string path = "/dev/ttyACM0";
 Imu imu(path, 26, .007);
 
-void *control_stabilizer(void *thread_id){
- 
-    //printf("INSIDE CONTROL_STABALIZER\n");
+Xbee joystick("/dev/ttyUSB3",9);
 
-    State imu_data; 
+#define ncurse 1
+#if ncurse ==1
+	#define printf(...) printw(__VA_ARGS__)
+#endif
+
+void *control_stabilizer(void *thread_id){
+
+printf("in control stabilizer \n");
+    State imu_data;
+    int range_sonar_1, range_sonar_2, range_sonar_3, range_sonar_4; 
+    
+    Distances sonar_distances;
+    Distances repulsive_forces;
     //weights is used for filter: current, one value ago, 2 values ago
     Weights weights = {.7,.2,.1};
 
@@ -86,25 +108,34 @@ void *control_stabilizer(void *thread_id){
     Vicon new_vicon_vel,      old_vicon_vel,      old_old_vicon_vel      = {0};
     Vicon new_filt_vicon_vel, old_filt_vicon_vel, old_old_filt_vicon_vel = {0};
 
-
+//for display
     State imu_error = {0};
     Control_command U = {0};
     Angles desired_angles = {0};
     uint8_t joystick_thrust , flight_mode = 0;
     int succ_read;
-    int new_xbee_data;
-    int new_imu_data;
-    times.delta.tv_nsec = 500000;
-while(SYSTEM_RUN) 
-{
+    int new_xbee_data, new_imu_data, new_sonar_data_x_pos, new_sonar_data_x_neg, new_sonar_data_y_pos, new_sonar_data_y_neg;
+    times.delta.tv_nsec = delta_time; //500000;
+
+	clock_gettime(CLOCK_REALTIME,&s);
+	clock_gettime(CLOCK_REALTIME,&f);
+    	clock_gettime(CLOCK_REALTIME,&dd);
+        clock_gettime(CLOCK_REALTIME,&tt);
+	
+while(SYSTEM_RUN) {
 	//calc new times and delta
-	//time_calc(times);    
+	float dt = UTILITY::calcDt(dd,tt);    
+	//time_calc(times_display);
 
-	time_calc(times_display);
+	new_sonar_data_x_pos = sonar_x_pos.get_sonar_data(x_pos);
+	new_sonar_data_x_neg = sonar_x_neg.get_sonar_data(x_neg);
+	new_sonar_data_y_pos = sonar_y_pos.get_sonar_data(y_pos);
+	new_sonar_data_y_neg = sonar_y_neg.get_sonar_data(y_neg);
 
-	//reads input from imu (in degrees), distributes into fields of imu_dataa
-	//get_imu_inv returns >0 if read successful,< 0 if not. Reuse old values if not successful
-	int new_imu_data =  imu.get_imu_calibrated_data(imu_data); 
+	//reads input from imu (in degrees), distributes into fields of imu_data
+	//get_imu_data returns 1 if read successful,< 0 if not. Reuse old values if not successful
+	int new_imu_data = imu.get_imu_calibrated_data(imu_data);
+	
 
 	//can switch between psi estimators
 	if(!MAGN) imu_data.psi = imu_data.psi_gyro_integration;
@@ -120,7 +151,6 @@ while(SYSTEM_RUN)
 		new_vicon_vel = vicon_velocity(new_filt_vicon, old_filt_vicon);
 		//filter velocities
 		new_filt_vicon_vel = filter_vicon_data(new_vicon_vel, old_vicon_vel, old_old_vicon_vel, weights);       
-
 		//set old_old data to old_data, and old_data to new data
 		//vicon data
 		pushback(new_vicon,      old_vicon,      old_old_vicon);
@@ -140,18 +170,25 @@ while(SYSTEM_RUN)
 	{
 		Angles old_desired_angles = desired_angles;
 		//get joystick data => desired angles
-		new_xbee_data = select_get_joystick_data(usb_xbee, desired_angles, joystick_thrust, flight_mode);
+		//new_xbee_data = select_get_joystick_data(usb_xbee, desired_angles, joystick_thrust, flight_mode);
+		new_xbee_data = joystick.get_xbee_data(desired_angles,joystick_thrust,flight_mode);
+
 
 		if(new_xbee_data < 0) ; //printf("joystick not ready to read: old data");
 		//check flight mode
 		    if(ESTOP)
 		    {
-			    if(flight_mode < 11.0) {printf("FLIGHT MODE: OFF %i \n", flight_mode); CONTROLLER_RUN = false;}
+			    if(flight_mode < 11.0) 
+				{
+					//printf("FLIGHT MODE: OFF %i \n", flight_mode); 
+					CONTROLLER_RUN = false;
+				}
 			    else if (flight_mode > 15.0 && flight_mode < 17.0) AUTO_HEIGHT = false;
 			    else if (flight_mode > 17.0) AUTO_HEIGHT = true;
 		    }
 	}
-	    //calculate error from imu (in radians) between desired and measured state
+
+	//calculate error from imu (in radians) between desired and measured state
 	State imu_error = error_imu(imu_data, desired_angles);
 
 	//calculate thrust and desired acceleration
@@ -159,25 +196,34 @@ while(SYSTEM_RUN)
 
 	//calculate the forces of each motor and change force on motor objects and send via i2c 
 	set_forces(U,Ct,d);
-       if (LOG_DATA && ( (new_xbee_data>0) || (new_imu_data>0) ) )    
-	{ 
-	log_data(times_display, new_vicon, new_vicon_vel, new_filt_vicon, new_filt_vicon_vel, vicon_error, imu_data, imu_error, desired_angles);
+
+	//printf("BOOOOL: %i\n", (LOG_DATA && ( (new_xbee_data>0) || (new_imu_data>0) || (new_sonar_data_1>0) || (new_sonar_data_2>0) || (new_sonar_data_3>0) || (new_sonar_data_4>0) ) ) );
+	if (LOG_DATA && ( (new_xbee_data>0) || (new_imu_data>0) || (new_sonar_data_x_pos>0) || (new_sonar_data_x_neg>0) || (new_sonar_data_y_pos>0) || (new_sonar_data_y_neg>0) ) )   
+	//if(true)
+	{
+	 clock_gettime(CLOCK_REALTIME,&f);
+	 //printf("freq new data is available: %f \n", 1/joystick.calcDt(s,f));
+	 clock_gettime(CLOCK_REALTIME,&s);
+	 //printf("number of times new data is available: %i \n", aa++);
+	log_data(sonar_distances, dt, new_vicon, new_vicon_vel, new_filt_vicon, new_filt_vicon_vel, vicon_error, imu_data, imu_error, desired_angles);       
 	}
-       if (DISPLAY_RUN) 
+	if (DISPLAY_RUN) 
 	{ 
-	display_info(new_xbee_data,  imu_data, vicon_error, imu_error, U, new_vicon, new_filt_vicon, new_vicon_vel, new_filt_vicon_vel, desired_angles,joystick_thrust, flight_mode, times_display, time_m); 
+	display_info(sonar_distances, new_xbee_data,  imu_data, vicon_error, imu_error, U, new_vicon, new_filt_vicon, new_vicon_vel, new_filt_vicon_vel, desired_angles,joystick_thrust, flight_mode, times_display, time_m); 
 	}
 
 }
  
     printf("EXIT CONTROL_STABILIZER\n");
     pthread_exit(NULL);
+
 }
+
 void desired_angles_calc(Angles& desired_angles, const State_Error& error, const Gains& gains){
 
     desired_angles.psi     = 0;
-    desired_angles.phi     =  gains.kp_y*error.y.prop - gains.kd_y*error.y.deriv + gains.ki_y*error.y.integral;
-    desired_angles.theta   = -gains.kp_x*error.x.prop + gains.kd_x*error.x.deriv - gains.ki_x*error.x.integral;
+    desired_angles.phi     =  gains.kp_y*error.y.prop - gains.kd_y*error.y.deriv + gains.ki_y*error.y.integral; //5.y_pos_sensor - 5*y_neg_sensor
+    desired_angles.theta   = -gains.kp_x*error.x.prop + gains.kd_x*error.x.deriv - gains.ki_x*error.x.integral; //5.x_pos_sensor - 5*x_neg_sensor
 
 }
 State_Error error_vicon(State_Error& error, const Vicon& pos_filt, const Vicon& vel_filt, const Positions& desired_positions, const Times& times){
@@ -198,6 +244,7 @@ State_Error error_vicon(State_Error& error, const Vicon& pos_filt, const Vicon& 
     error.z.integral = error.z.integral + (error.z.prop * tv2float(times.delta));
 
 }
+
 void *motor_signal(void *thread_id){
 
    //printf("INSIDE MOTOR_SIGNAL\n");
@@ -220,6 +267,8 @@ void *motor_signal(void *thread_id){
 
    pthread_exit(NULL);
 }
+
+
 void start_motors(void){
     //set speed to 30 out of 255
     printf("Starting Motors ...\n");
@@ -235,6 +284,7 @@ void stop_motors(void){
     motor_3.set_force(0, false);
     motor_4.set_force(0, false);
 }
+
 void controller_on_off(bool &CONTROLLER_RUN){
     if(CONTROLLER_RUN == false){
         printf("Controller ON!!\n");
@@ -258,14 +308,22 @@ void display_on_off(bool& DISPLAY_RUN){
 State error_imu(const State& imu_data, const Angles& desired_angles){
     //calculate error in RADIANS
     //  xxx_d is xxx_desired.  imu outputs  degrees, we convert to radians with factor PI/180
+    // 
     State error;
-    error.phi       =     (-imu_data.phi    +   desired_angles.phi) * PI/180;
-    error.theta     =     (-imu_data.theta  + desired_angles.theta) * PI/180;
-    error.psi       =     (-imu_data.psi    +   desired_angles.psi) * PI/180;
-    /*clear();
+    error.phi    =  (desired_angles.phi   - imu_data.phi)      * PI/180;
+    error.theta  =  (desired_angles.theta - imu_data.theta)   * PI/180;
+
+    if (SONAR_BUBBLE)
+    {
+	 error.phi   += repulsion_factor*(UTILITY::dist2ScaleInv(sonar_y_neg.returnLastDistance(), minDist, maxDist) - UTILITY::dist2ScaleInv(sonar_y_pos.returnLastDistance(), minDist, maxDist))  * PI/180;
+         error.theta += repulsion_factor*(UTILITY::dist2ScaleInv(sonar_x_pos.returnLastDistance(), minDist, maxDist) - UTILITY::dist2ScaleInv(sonar_x_neg.returnLastDistance(), minDist, maxDist))  * PI/180;
+    }
+
+    error.psi       =     (-imu_data.psi  + desired_angles.psi) * PI/180;
+    /*if(ncurse)clear();
     printf("error.psi(desired_psi - imu_psi) , %3.3f  imu_data.psi %3.3f, desired_angles.psi %3.3f\n", error.psi, imu_data.psi, desired_angles.psi);
     printf("error.theta(desired_psi - imu_theta) , %3.3f  imu_data.theta %3.3f, desired_angles.theta %3.3f\n", error.theta, imu_data.theta, desired_angles.theta);
-    refresh();
+    if(ncurse)refresh();
     */
     error.phi_dot   =                           (-imu_data.phi_dot) * PI/180;
     error.theta_dot =                         (-imu_data.theta_dot) * PI/180;
@@ -289,15 +347,17 @@ Control_command thrust(const State& imu_error, const State_Error& vicon_error, c
     U.yaw_acc   =  (gains.kp_psi   * imu_error.psi  )  +  (gains.kd_psi   * imu_error.psi_dot  )  + U_trim.yaw_acc;
    /*printf("U.yaw_acc %3.3f  =  (gains.kp_psi %3.3f   * imu_error.psi %3.3f  )  +  (gains.kd_psi %3.3f  * imu_error.psi_dot %3.3f  ) \n", 
                         U.yaw_acc, gains.kp_psi, imu_error.psi, gains.kd_psi, imu_error.psi_dot);
-   refresh(); 
+   if(ncurse)refresh(); 
    */
    if (U.thrust <= 0) U.thrust = 0;
    
     return U;
 }
+
 void set_forces(const Control_command& U, double Ct, double d){
       //calculate forces from thrusts and accelerations
-      if(!XConfig)
+    
+  if(!XConfig)
     {//this is Plus Configuration
         double force_1 = (U.thrust/4 - (U.yaw_acc /(4*Ct)) + (U.pitch_acc /  (2*d)));
         double force_2 = (U.thrust/4 + (U.yaw_acc /(4*Ct)) - (U.roll_acc  /  (2*d)));
@@ -329,7 +389,9 @@ void set_forces(const Control_command& U, double Ct, double d){
         motor_3.set_force( round(x3), CONTROLLER_RUN );
         motor_4.set_force( round(x4), CONTROLLER_RUN );
     }
+
 }
+
 Vicon vicon_velocity(Vicon& current, Vicon& old){
     
     Vicon velocity = {0.0};
@@ -343,10 +405,11 @@ Vicon vicon_velocity(Vicon& current, Vicon& old){
 
     return velocity;    
 }
-void log_data(const Times& times, const Vicon& new_vicon, const Vicon& new_vicon_vel, const Vicon& new_filt_vicon, const Vicon& new_filt_vicon_vel, const State_Error& vicon_error, const State& imu_data, const State& imu_error, const Angles& desired_angles){
+
+void log_data(const Distances& sonar_distances, const float& dt, const Vicon& new_vicon, const Vicon& new_vicon_vel, const Vicon& new_filt_vicon, const Vicon& new_filt_vicon_vel, const State_Error& vicon_error, const State& imu_data, const State& imu_error, const Angles& desired_angles){
 
     Data_log d;
-    d.time   = times;
+    d.dt   = dt;
     d.vicon_data      = new_vicon;
     d.vicon_vel       = new_vicon_vel;
     d.vicon_data_filt = new_filt_vicon;
@@ -359,16 +422,33 @@ void log_data(const Times& times, const Vicon& new_vicon, const Vicon& new_vicon
     d.forces.motor_3  = *(motor_3.get_force());
     d.forces.motor_4  = *(motor_4.get_force());
     d.desired_angles  = desired_angles;
-    
+    	Distances sonarDist;
+	
+	sonarDist.x_pos = sonar_x_pos.returnLastDistance();
+	sonarDist.x_neg = sonar_x_neg.returnLastDistance();
+	sonarDist.y_pos = sonar_y_pos.returnLastDistance();
+	sonarDist.y_neg = sonar_y_neg.returnLastDistance();
+    	//printf(" x_pos) %i, x_neg) %i, y_pos) %i y_neg) %i \n",sonarDist.x_pos, sonarDist.x_neg, sonarDist.y_pos, sonarDist.y_neg);
+	d.sonar_distances = sonarDist;
+
+	RepForces scales;
+	scales.x_pos = repulsion_factor*UTILITY::dist2ScaleInv(sonar_x_pos.returnLastDistance(), minDist, maxDist);
+	scales.x_neg = repulsion_factor*UTILITY::dist2ScaleInv(sonar_x_neg.returnLastDistance(), minDist, maxDist);
+	scales.y_pos = repulsion_factor*UTILITY::dist2ScaleInv(sonar_y_pos.returnLastDistance(), minDist, maxDist);
+	scales.y_neg = repulsion_factor*UTILITY::dist2ScaleInv(sonar_y_neg.returnLastDistance(), minDist, maxDist);
+	d.scales = scales;
+
+	
     logger.log(d);
 }
-void display_info(const int succ_read,  const State& imu_data, const State_Error& vicon_error, const State& imu_error, const Control_command& U, const Vicon& vicon, const Vicon& vicon_filt, const Vicon& vicon_vel, const Vicon& vicon_vel_filt, const Angles& desired_angles,const int  joystick_thrust, const int  flight_mode, const Times& times, const Times& time_m){
+
+void display_info(const Distances& sonar_distances, const int succ_read,  const State& imu_data, const State_Error& vicon_error, const State& imu_error, const Control_command& U, const Vicon& vicon, const Vicon& vicon_filt, const Vicon& vicon_vel, const Vicon& vicon_vel_filt, const Angles& desired_angles,const int  joystick_thrust, const int  flight_mode, const Times& times, const Times& time_m){
     
     display_count++;
     if(! ( (display_count % 200) == 0) ) return;
-    // system("clear");
-    clear();//function in curses library  
-    
+ 
+    if(ncurse)clear();//function in curses library  
+   
     printf("<==========================================>\n");   	
         printf("        System Flags    \n");
 	printf("CONTROLLER_RUN = "); printf(CONTROLLER_RUN ? "true\n" : "false\n");
@@ -379,8 +459,8 @@ void display_info(const int succ_read,  const State& imu_data, const State_Error
         printf("Last read success? %i \n", imu_data.succ_read);
         printf("phi:   %7.2f         phi dot:   %7.2f \n",imu_data.phi, imu_data.phi_dot);//, imu_data.phi, imu_data.phi_dot);
         printf("theta: %7.2f         theta dot: %7.2f\n",imu_data.theta, imu_data.theta_dot);
-	printf("psi:   %7.2f         psi dot:   %7.2f    psi uncal:   %7.2f\n\n",imu_data.psi, imu_data.psi_dot, imu_data.psi_contin);
-
+        printf("psi:   %7.2f         psi dot:   %7.2f    psi uncal:   %7.2f\n\n",imu_data.psi, imu_data.psi_dot, imu_data.psi_contin);
+    
 /*
    
 	printf("        VICON DATA                                                          FILTERED VICON DATA   \n");
@@ -403,12 +483,15 @@ printf("psi_dot:  %10.2f       z_dot: %10.2f                  psi_dot:   %10.2f 
         printf("theta:    %10.2f\n", desired_angles.theta);
         printf("psi:      %10.2f\n\n", desired_angles.psi);
         
-*/        
-     printf("        JOYSTICK DATA ");
-        printf("Last read success? %i \n", succ_read);
+*/  
+      
+     printf("        JOYSTICK DATA\n ");
+	if(flight_mode < 11) printf("Flight Mode: OFF %i \n", flight_mode);
+        printf("Last read success? %i  freq: %f \n", succ_read, 1/joystick.getDt());
         printf("phi: %.2f         theta: %.2f      psi: %.2f \n",  desired_angles.phi, desired_angles.theta, desired_angles.psi);
         printf("flight_mode: %i  joystick_thrust:  %i \n\n",flight_mode, joystick_thrust);
 
+/*
     printf("        THRUST \n");
         printf("U_trim: %i, joystick: %i \n\n", U_trim.thrust, joystick_thrust);   
       
@@ -433,13 +516,14 @@ printf("psi_dot:  %10.2f       z_dot: %10.2f                  psi_dot:   %10.2f 
         printf("Psi: KP %10.2f KD: %10.2f \n\n", gains.kp_psi, gains.kd_psi);
 
 
-
-
-/*
 	printf("        THRUST(0-255): Current mode is");
 	printf(VICON_OR_JOY ? " VICON: Thrust = Calc_Thrust + Trim_Thrust\n" : " JOYSTICK: Thrust = joystick_thrust from Joystick\n");    
 	printf("U.thrust: %i, joystick_thrust %i, U.trim %i  \n\n", U.thrust, joystick_thrust, U_trim.thrust);
-*/ 
+
+*/
+
+
+ 
     printf("        FORCES (0-255)     \n");
         printf("motor_1: %i  ", *(motor_1.get_force()));
         printf("motor_2: %i  ", *(motor_2.get_force()));
@@ -454,7 +538,17 @@ printf("psi_dot:  %10.2f       z_dot: %10.2f                  psi_dot:   %10.2f 
        // printf("%lld.%.9ld", (long long)times.current.tv_sec, times.current.tv_nsec);
         printf("Time Date                     :    %s\n ", times.date_time);
 */
-        refresh();//refreshes shell console to output this text
+
+
+	printf("        Sonar: Distance (300 mm -5000 mm) and Frequency (Hz)     \n");
+	printf("X+) succ_read: %i, freq: %f, distance: %i, repulsive_scale [0,1] %f \n", x_pos.succ_read, 1/sonar_x_pos.getDt(), sonar_x_pos.returnLastDistance(), repulsion_factor*UTILITY::dist2ScaleInv(sonar_x_pos.returnLastDistance(), minDist, maxDist));  
+	printf("X-) succ_read: %i, freq: %f, distance: %i, repulsive_scale [0,1] %f \n", x_neg.succ_read, 1/sonar_x_neg.getDt(), sonar_x_neg.returnLastDistance(), repulsion_factor*UTILITY::dist2ScaleInv(sonar_x_neg.returnLastDistance(), minDist, maxDist));
+	printf("Y+) succ_read: %i, freq: %f, distance: %i, repulsive_scale [0,1] %f \n", y_pos.succ_read, 1/sonar_y_pos.getDt(), sonar_y_pos.returnLastDistance(), repulsion_factor*UTILITY::dist2ScaleInv(sonar_y_pos.returnLastDistance(), minDist, maxDist));
+	printf("Y-) succ_read: %i, freq: %f, distance: %i, repulsive_scale [0,1] %f  \n", y_neg.succ_read, 1/sonar_y_neg.getDt(),sonar_y_neg.returnLastDistance(), repulsion_factor*UTILITY::dist2ScaleInv(sonar_y_neg.returnLastDistance(), minDist, maxDist));
+	if(ncurse)refresh();//refreshes shell console to output this text
+
+
+
 }
 
 //executes input from host computer on motors, controller gains, displays, and controller
@@ -464,8 +558,7 @@ void *command_input(void *thread_id){
     unsigned char command;
     string input;
 
-    while(SYSTEM_RUN) 
-{
+    while(SYSTEM_RUN) {
 	    printf("    please give input for command_input: ");
         //command = getchar(); 
         //getline(cin, input);
@@ -537,7 +630,7 @@ void *command_input(void *thread_id){
             case 'B':
                 display_on_off(DISPLAY_RUN);
                // system("clear");
-               //clear(); //function in curses library
+               //if(ncurse)clear(); //function in curses library
                 break;
                 
             case 'c':
@@ -546,7 +639,7 @@ void *command_input(void *thread_id){
                   printf("Maximum Thrust Reached: Cannot Increase Thrust\n");
                   U_trim.thrust = max_thrust;}
                 else {U_trim.thrust += delta_thrust; 
-                     printf("Increase Thrust: %f\n", U_trim.thrust);}
+                     printf("Increase Thrust: %i\n", U_trim.thrust);}
               break;
                 
             case 'v':
@@ -554,7 +647,7 @@ void *command_input(void *thread_id){
                 if((U_trim.thrust-=delta_thrust) <= 0) {
                 printf("Thrust is 0. Cannot decrease further\n");
                 U_trim.thrust = 0;}
-                else {printf("Decrease Thrust: %f\n", U_trim.thrust);}
+                else {printf("Decrease Thrust: %i\n", U_trim.thrust);}
               break;
                
             case 'i':
@@ -637,8 +730,8 @@ void *command_input(void *thread_id){
                 break;
              
             case '`':
-                clear();
-                refresh();
+                if(ncurse)clear();
+                if(ncurse)refresh();
                 break;
                 
               //used after j: s,w,r,f,v
@@ -668,7 +761,7 @@ void configure_threads(void){
     
     // system("clear");
      //printf("INSIDE CONFIGURE_THREADS\n");
-     	refresh();
+     	//if(ncurse)refresh();
      // Set thread attributes: FIFO scheduling, Joinable
      // the sched_param.sched_priorirty is an int that must be in [min,max] for a certain schedule policy, in this case, SCHED_FIFO
      pthread_attr_init(&attr);
@@ -680,7 +773,7 @@ void configure_threads(void){
      	// create threads
      
      printf("=> creating control_stabilizer thread\n");
-     	refresh();
+     //	if(ncurse)refresh();
      // Higher priority for filter
      param.sched_priority = fifo_max_prio;
      pthread_attr_setschedparam(&attr, &param);
@@ -688,7 +781,7 @@ void configure_threads(void){
      usleep(onesecond);
   
      printf("=> creating motor_signal thread\n");
-     	refresh();
+     	//if(ncurse)refresh();
      // Medium priority for motor_signal
      param.sched_priority = (fifo_max_prio+fifo_min_prio)/2;
      pthread_attr_setschedparam(&attr, &param);
@@ -697,7 +790,7 @@ void configure_threads(void){
 //	printf("final usleep done");
 
      printf("=> creating command_input thread\n");
-	refresh();
+	//if(ncurse)refresh();
      // Lower priority for commmand input
      param.sched_priority = (fifo_max_prio+fifo_min_prio)/2;
      pthread_attr_setschedparam(&attr, &param);
@@ -715,91 +808,51 @@ void configure_threads(void){
     
      pthread_attr_destroy(&attr);
 }
-void init(void){
+void init(void)
+{
     //ncurses
-    initscr();
+    if(ncurse) initscr();
 
    //finds bias in gyro and checks for out of range imu values. returns 1 if bad imu values.
    printf("finding gyro bias...\n");  
-   refresh();
+   //if(ncurse)refresh();
    if(imu.calibrate() == 1) ;
    else CONTROLLER_RUN = false;
-   refresh();
-   
-   //usleep(onesecond*3);
-   printf("opening usb port for xbee...\n");
-   usb_xbee = select_open_xbee_port();//open_xbee_port(); 
-     if (usb_xbee > 0) printf("Done!\n");
-     else printf("Fail to open xbee port!\n");
-    refresh();
+   //if(ncurse)refresh();
+	
+printf("joystick.check_start_thrust() %i \n", joystick.check_start_thrust());
+/*
+   if(!VICON_OR_JOY)
+   {
+	if(joystick.check_start_thrust() > 0) CONTROLLER_RUN = true;
+	else				      CONTROLLER_RUN = false;
 
+	printf("CONTROLLER_RUN: %i\n\n", CONTROLLER_RUN);
+	//if(ncurse)refresh();
+   }
+*/
    set_gains(gains);
    set_initial_times(times);
    set_initial_times(times_display);
-   
-    //check that thrust is zero from joystick
- if (!VICON_OR_JOY) 
- {
-    printf("Checking joystick_data...\n");
-    refresh();
-	Angles bogus_angles ={5.0}; 
-	uint8_t joystick_thrust , flight_mode = 0;
-    int i, s , f = 0;
-    timespec start_joy, current_joy;
-    clock_gettime(CLOCK_REALTIME,&start_joy);
-    clock_gettime(CLOCK_REALTIME,&current_joy);
-    while(i<100)
-    { 
-    int suc_read = select_get_joystick_data(usb_xbee, bogus_angles, joystick_thrust, flight_mode);
-    clock_gettime(CLOCK_REALTIME,&current_joy); 
-    
-    if(suc_read > 0) 
-        {
-                 i++; 
-                 if(joystick_thrust > 30 ) 
-                         {
-                                        SYSTEM_RUN = false;
-                                        printf("!!!!!JOYSTICK HAS TO MUCH INITIAL THRUST (%f) - SYSTEM_RUN SET TO FALSE - PROGRAM WILL EXIT NOW!!!!!\n", joystick_thrust);
-                                        print_data_joy(bogus_angles, joystick_thrust, flight_mode);
-                                        refresh();
-                                        usleep(onesecond*2);
-                                        endwin();
-                                        exit(0);
-                          
-                         }
-                 else f++;
-
-         }
-    float elapsed_time = UTILITY::timespec2float(UTILITY::time_diff(start_joy,current_joy));
-    //printf("elapsed time: %f\n", elapsed_time);
-    //refresh();
-
-    if(elapsed_time > 3)
-          {
-            printf("!!!!!NOT RECEIVING ANY JOYSTICK DATA!!!!\n", joystick_thrust);
-            refresh();
-          }
-
-    }
-    //print_data_joy(bogus_angles, joystick_thrust, flight_mode);
-    //usleep(onesecond*2);
-    refresh();
- 
-    }   
 }
 
-int main(void){
+int main(void)
+{
 	//intialize desired angles, gains, U_trim, & open port ot xbee and imu
 	init();
-  
-    start_motors();
-    configure_threads();
+	
+	//if(ncurse)clear();
+	printf("in main \n"); //if(ncurse)refresh();
+	
+	start_motors();
 
-    usleep(onesecond*2);
-	//clear();
-	endwin();
+	configure_threads();
 
-    return 0;
+	usleep(onesecond*2);
+	//if(ncurse)clear();
+	if(ncurse) endwin();
+
+	return 0;
 
 }
 

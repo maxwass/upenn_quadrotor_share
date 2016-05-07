@@ -33,8 +33,6 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 // Member functions definitions including constructor
 logger::logger(string filename, int cycles_until_log, bool LOG_DATA)
 {
-	first_loop = true;	
-
 	//when queue gets larget than this, will flush all
 	max_queue_length = cycles_until_log; 
     	
@@ -44,6 +42,7 @@ logger::logger(string filename, int cycles_until_log, bool LOG_DATA)
 	time (&rawtime);
 	timeinfo = localtime(&rawtime);
 	strftime(buffer,80,"%d-%m-%Y__%I_%M_%S.log",timeinfo);
+	first_loop = true;
 	
     	const char *filename_p = buffer;// filename.c_str();
 	
@@ -77,29 +76,43 @@ void logger::write_to_file( void )
 }
 
 void logger::unwrap(Data_log d){
+   
+   if(first_loop)
+	{
+	//time
+		myfile <<  "controller_loop_dt" <<  ", ";
 
-if(first_loop)
-{
-//imu
-	myfile <<  "theta" <<  ", " << "phi" << ", " << "psi_magnet" << ", "  << "psi_gyro_integ" << ", "<< "theta_dot" <<  ", " << "phi_dot" << ", "<< "psi_dot" << ", " << "dt" << ", " << "numPsiRot"<< ", ";
-//motor	
-	myfile <<  "m1" <<  ", " << "m2" <<  ", " << "m3" <<  ", " << "m4" <<  ", ";        
-//desired angles
-	myfile <<  "theta_des" <<  ", " << "phi_des" <<  ", " << "psi_des" <<  ", ";
- 
-	myfile << "\n";
-}
-   //this->format(d.time);            myfile << ", ";    
+	//imu
+		myfile <<  "theta" <<  ", " << "phi" << ", " << "psi_magnet" << ", "  << "psi_gyro_integ" << ", "<< "theta_dot" <<  ", " << "phi_dot" << ", "<< "psi_dot" << ", " << "dt_imu" << ", " << "numPsiRot"<< ", ";
+	//motor	
+		myfile <<  "m1" <<  ", " << "m2" <<  ", " << "m3" <<  ", " << "m4" <<  ", ";        
+	//desired angles
+		myfile <<  "theta_des" <<  ", " << "phi_des" <<  ", " << "psi_des" <<  ", ";
+
+	//SonarTest
+		// myfile <<  "num_fds_n1"  << ", " <<  "num_fds_0" << ", " <<  "num_fds_1" << ", " << "num_fds_p" << ", " <<  "succ_read" << ", " <<  "distance" << ", " <<  "index" << ", " <<  "foundFirstByte" << ", " <<  "byte_read";
+
+	//Sonar Distances
+		myfile <<  "dist_x_pos"  << ", " <<  "dist_x_neg" << ", " <<  "dist_y_pos" << ", " << "dist_y_neg" <<  ", ";
+		
+	//Sonar Repulsive forces
+		 myfile <<  "scale_x_pos"  << ", " <<  "scale_x_neg" << ", " <<  "scale_y_pos" << ", " << "scale_y_neg";
+
+		 myfile << "\n";
+	}
+   this->format(d.dt);            myfile << ", ";    
    // this->format(d.vicon_data);      myfile << ", ";
    // this->format(d.vicon_data_filt); myfile << ", "; 
    // this->format(d.vicon_vel);       myfile << ", "; 
    // this->format(d.vicon_vel_filt);  myfile << ", "; 
    // this->format(d.vicon_error);     myfile << ", ";
    //this->format(d.read_error);	     myfile << ", ";
-    this->format(d.imu);             myfile << ", ";
+   this->format(d.imu);             myfile << ", ";
    // this->format(d.imu_error);       myfile << ", ";
-    this->format(d.forces);          myfile << ", ";
-   this->format(d.desired_angles); 	
+   this->format(d.forces);          myfile << ", ";
+   this->format(d.desired_angles);    myfile << ", "; 	
+   this->format(d.sonar_distances);	myfile << ", ";
+   this->format(d.scales);    myfile << ", ";
    myfile << "\n";
    first_loop = false;
 }
@@ -116,7 +129,10 @@ return s;
 }
 //time is outputted in micro_seconds
 void logger::format(Times t){
-    myfile << (t.date_time) << ", " << num2str(1000*((double) t.delta.tv_sec + (t.delta.tv_nsec / 1000000000.0)));    
+    myfile << num2str(1000*((double) t.delta.tv_sec + (t.delta.tv_nsec / 1000000000.0)));//(t.date_time) << ", " << num2str(1000*((double) t.delta.tv_sec + (t.delta.tv_nsec / 1000000000.0)));    
+}
+void logger::format(float f){
+    myfile <<  num2str(100000*f);
 }
 void logger::format(Vicon v){
     myfile <<  num2str(v.x) <<  ", " << num2str(v.y) << ", " << num2str(v.z) << ", " << num2str(v.theta) <<  ", " << num2str(v.phi) << ", " << num2str(v.psi);
@@ -141,10 +157,18 @@ void logger::format(State imu){
 void logger::format(Motor_forces mf){
     myfile << num2str(mf.motor_1) << ", " << num2str(mf.motor_2) << ", " << num2str(mf.motor_3) << ", " << num2str(mf.motor_4);
 }
+void logger::format(SonarTest s){
+	myfile <<  num2str(s.num_fds_n1) << ", " << num2str(s.num_fds_0) << ", " << num2str(s.num_fds_1) << ", " << num2str(s.num_fds_p) << ", " << num2str(s.succ_read) << ", " <<num2str(s.distance) <<  ", " << num2str(s.index) <<  ", " << num2str(s.foundFirstByte) <<  ", " << num2str((int)s.lastByte);
+}
 void logger::format(Angles a){
     myfile << num2str(a.theta) << ", " << num2str(a.phi) << ", " << num2str(a.psi);
 }
-
+void logger::format(Distances a){
+    myfile << num2str(a.x_pos) << ", " << num2str(a.x_neg) << ", " << num2str(a.y_pos) << ", " << num2str(a.y_neg);
+}
+void logger::format(RepForces a){
+    myfile << num2str(a.x_pos) << ", " << num2str(a.x_neg) << ", " << num2str(a.y_pos) << ", " << num2str(a.y_neg);
+}
 
 
 

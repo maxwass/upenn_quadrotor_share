@@ -26,7 +26,6 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 */
 
-
 #ifndef UTILS_H
 #define UTILS_H
 
@@ -46,7 +45,6 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 timespec time_diff(timespec start, timespec end);                                                                                                                         
 double timespec2float (const timespec& time);
 
-
 class UTILITY{
         public:
         static timespec time_diff(timespec start, timespec end)
@@ -63,22 +61,56 @@ class UTILITY{
                     temp.tv_nsec = end.tv_nsec-start.tv_nsec;
                 }
                 return temp;
-        } 
-         
+        }
+
         static double timespec2float (const timespec& time)
         {
                 return ((double) time.tv_sec + (time.tv_nsec / 1000000000.0));
         }
 
-};  
+	static float calcDt(timespec& oldT, timespec& newT){
+                //track dt between reads
+                clock_gettime(CLOCK_REALTIME,&newT);
+                float dt = UTILITY::timespec2float(UTILITY::time_diff(oldT, newT));
+                clock_gettime(CLOCK_REALTIME,&oldT);
+                return dt;
+	}
+	
+	static float dist2Scale(int dist, int minDist2Wall, int maxDist2Wall)
+	{	//input is a distance
+		//linearly mapped to a scale factor [0, 1] 
+		// when close to object, will be 0, when far, will be 1
+			// will be used as a desired angle for repulsive force and to lmit angle when close to wall
+	
+		if(dist >=  maxDist2Wall)
+		{
+		      //printf("case 1: distance  %i >= maxDist2Wall %i, scale: %f \n", dist, maxDist2Wall, 1.00);
+		      return 1.00;
+			
+		}
+		else if(dist <= minDist2Wall)
+		{
+			//printf("case 2: distance  %i <= minDist2Wall %i, scale: %f\n", dist, minDist2Wall, 0.00);
+ 			return 0.00;
+		}
+
+		else
+		{
+
+			float scale = (float) dist/(maxDist2Wall-minDist2Wall) -  (float) minDist2Wall/(maxDist2Wall-minDist2Wall) ;
+			//printf("case 3: distance  %i,  minDist2Wall %i,  maxDist2Wall %i, scale %f \n\n", dist, minDist2Wall, maxDist2Wall, scale);
+			return scale;
+		}
 
 
+	}
 
+	static float dist2ScaleInv(int dist, int minDist2Wall, int maxDist2Wall)
+        {       //inverse of the output of dist2Scale
+		return (1 - UTILITY::dist2Scale(dist, minDist2Wall, maxDist2Wall)) ;
+        }
 
-
-
-
-
+};
 
 
 #endif   

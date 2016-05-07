@@ -38,6 +38,19 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <time.h> // for struct timeval
 #include <string>
 
+
+typedef struct sonartest {
+int distance;
+int succ_read;
+int num_fds;
+char lastByte;
+float dt;
+int index;
+bool foundFirstByte, foundLastByte;
+long num_fds_n1, num_fds_0, num_fds_1, num_fds_p;
+} SonarTest;
+
+
 //cal = calibrated, contin = continuous
 typedef struct state {
 float theta, phi, psi, psi_contin, theta_dot, phi_dot, psi_dot;
@@ -48,6 +61,22 @@ float dt;
 float numPsiRot;
 
 } State ;
+
+typedef struct repforces {
+//int one, two, three, four, five, six;
+float x_pos, x_neg, y_pos, y_neg, up, down;
+} RepForces;
+
+
+
+ 
+typedef struct distances {
+//int one, two, three, four, five, six;
+int x_pos, x_neg, y_pos, y_neg, up, down;
+
+int succ_read;
+float dt;
+} Distances;
 
 
 typedef struct angles {
@@ -97,8 +126,10 @@ typedef struct motor_forces {
 int motor_1, motor_2, motor_3, motor_4;
 } Motor_forces;
 
+
 typedef struct data_log {
 Times time;
+float dt;
 
 Vicon vicon_data;
 Vicon vicon_vel;
@@ -117,6 +148,12 @@ Motor_forces forces;
 
 Angles desired_angles;
 
+Distances sonar_distances;
+
+RepForces scales;
+RepForces repulsive_forces;
+
+SonarTest sonar_test;
 } Data_log;
 
 #endif

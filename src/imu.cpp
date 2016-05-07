@@ -30,15 +30,17 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 */
 
+
 int Imu::get_imu_calibrated_data(State& imu_data){
 //identical to get_imu__data, but return calibrated values instead
         //get_raw_data
-        int succ = get_imu_data(imu_data);
+	imu_data.succ_read = -1;
+        imu_data.succ_read = get_imu_data(imu_data);
 
-        if(!(this->calibrated)) printf( "WARNING: RETURNING CALIBRATED IMU VALUES BEFORE PERFORMING CALIBRATION");
+        if(!(this->calibrated)) //printf( "WARNING: RETURNING CALIBRATED IMU VALUES BEFORE PERFORMING CALIBRATION");
         
 	//if successfuly recieved data, subtract off bias
-        if(succ==1)
+        if(imu_data.succ_read==1)
         {
 		imu_data.phi_dot    = imu_data.phi_dot_cal;
                 imu_data.theta_dot = imu_data.theta_dot_cal;
@@ -57,7 +59,7 @@ int Imu::get_imu_calibrated_data(State& imu_data){
 */  
       }
 
-	return succ;
+	return imu_data.succ_read;
 
 }
 int Imu::get_imu_data(State& imu_data)
@@ -70,7 +72,7 @@ int Imu::get_imu_data(State& imu_data)
     no_timeout.tv_usec = 0;
     int num_fds = select(port+1, &read_fds, NULL, NULL, &no_timeout);
 
-    int a;
+    int a = -10;
     //No data ready to read
     if(num_fds == 0)  a = -2;
 
@@ -108,6 +110,8 @@ int Imu::get_imu_data(State& imu_data)
                     else a = -1;
                 }
          }
+
+	return a;
 }
 void Imu::unpack_data(State& imu_data, const unsigned char arr[])
 {

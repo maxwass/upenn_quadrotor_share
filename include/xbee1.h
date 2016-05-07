@@ -28,63 +28,86 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 //=================================
 // include guard
-#ifndef LOGGER_H
-#define LOGGER_H
+#ifndef XBEE1_H
+#define XBEE1_H
 
-//=================================
-// included dependencies
+#include "utility.h"
 #include "data_structs.h"
+//#include "logger.h"
 
+#include <pthread.h>
+#include <termios.h>
+#include <stdint.h>
 #include <stdlib.h>
-#include <sys/ioctl.h>
-#include <iostream>
-#include <fcntl.h>
+#include <unistd.h>
 #include <linux/i2c.h>
 #include <linux/i2c-dev.h>
-#include <unistd.h>
-#include <stdint.h>
+#include <sys/ioctl.h>
+#include <fcntl.h>
+#include <string.h>
 #include <stdio.h>
-//file io
+#include <math.h>
+  // #include "serial1.h"
+#include <sys/time.h>
+#include <time.h>
 #include <iostream>
-#include <fstream>
-#include <sstream>
-#include <iomanip>
-#include <queue>
-#include <string>
+#include <curses.h> //for getch()
 
+#define PI 3.14159265359
+#define XBEE_START_BYTE 0xFD
+
+#define num_bytes_per_read 1
 using namespace std;
 
-class logger
-{
-   private:
-    ofstream myfile;
-    std::queue<Data_log> q;
-    int max_queue_length;
-    std::string filename;
-    bool first_loop;
-    const char *filename_p;
-    
-    void unwrap(Data_log d);
-    void format(Vicon v);
-    void format(Times t);
-    void format(State s);
-    void format(int i);
-    void format(float f);
-    void format(State_Error se);
-    void format(Errors e);
-    void format(Motor_forces mf);
-    void format(Angles a);
-    void format(Distances a);
-    void format(RepForces a);
-    void format(SonarTest s); 
-  public:
-    logger(std::string filename, int cycles_until_log, bool LOG_DATA);  // This is the constructor
-    void log(Data_log d);
-    void write_to_file(void);
-    template <typename num> string num2str(num f);
-    
+#define BAUDRATE_XBEE  B115200
+
+
+//int onesec = 1000000;
+
+class Xbee {
+        private:
+        int port;
+        struct termios newtio;
+        timespec oldT, newT;
+        float calc_dt;
+        std::string PATH2XBEE;
+	int DATASIZE;
+
+        bool foundFirstByte = false, foundLastByte = false;
+        int index = 0;
+
+        long num_fds_n1 = 0, num_fds_0 = 0, num_fds_1 = 0, num_fds_p = 0;
+
+        fd_set read_fds;
+        struct timeval no_timeout;
+
+        public:
+        Xbee(std::string PATH2XBEE, int DATASIZE);
+        int open_port(std::string PATH2XBEE, int DATASIZE);
+        int get_xbee_data(Angles& joystick_des_angles, uint8_t& joystick_thrust, uint8_t& flight_mode);
+        int get_xbee_helper(Angles& joystick_des_angles, uint8_t& joystick_thrust, uint8_t& flight_mode);
+        int checksum(const uint8_t arr[], int arr_length);
+	void print_raw_bytes(const uint8_t arr[], int arr_length);
+	void printData(Angles& joystick_des_angles, uint8_t& joystick_thrust, uint8_t& flight_mode);
+	void unpack_joystick_data(Angles& joystick_des_angles, uint8_t& joystick_thrust, uint8_t& flight_mode, uint8_t arr[]);
+	int check_start_thrust(void);
+	void get_stats(void);
+        void printStats(void);
+        void print_raw_bytes(const char arr[], int arr_length);
+        float calcDt(void);
+	float calcDt(timespec& oldT, timespec& newT);
+        float getDt(void);
+        void clean(void);
 };
- 
+
+
+
+
+
+
+
+
+
+
 
 #endif
-// __LOGGER_H_INCLUDED__

@@ -1,4 +1,3 @@
-
 /*
 Copyright (c) <2015>, <University of Pennsylvania:GRASP Lab>                                                             
 All rights reserved.
@@ -32,7 +31,6 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #ifndef CONTROLLER_H
 #define CONTROLLER_H
 
-
 //=================================
 // included dependencies
 #include "motor.h"   //#include because controller contains a motor object
@@ -43,7 +41,8 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "logger.h"
 #include "imu.h"
 #include "utility.h"
-
+#include "sonar.h"
+#include "xbee1.h"
 
 #include <pthread.h>
 #include <stdlib.h>
@@ -67,15 +66,15 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <iostream>
 
 //time utility change
+
 #define diff time_diff
 #define tv2float timespec2float
-//
 
 #define NUM_THREADS 3
 #define PI 3.14159265359
 
 //To comply with NCURSES create macro to go back and forth between printf and required printw 
-#define printf(...) printw(__VA_ARGS__)
+//#define printf(...) printw(__VA_ARGS__)
 //=================================
 
 double Ct=0.013257116418667*10;
@@ -107,8 +106,8 @@ State error_imu(const State& imu_data, const Angles& desired_angles);
 Control_command thrust(const State& imu_error, const State_Error& vicon_error, const Control_command& U_trim, const int joystick_thrust, const Gains& gains);
 void set_forces(const Control_command& U, double Ct, double d);
 Vicon vicon_velocity(Vicon& current, Vicon& old);
-void log_data(const Times& times, const Vicon& new_vicon, const Vicon& new_vicon_vel, const Vicon& new_filt_vicon, const Vicon& new_filt_vicon_vel, const State_Error& vicon_error, const State& imu_data, const State& imu_error, const Angles& desired_angles);
-void display_info(const int suc_read,  const State& imu_data, const State_Error& vicon_error, const State& imu_error, const Control_command& U, const Vicon& vicon, const Vicon& vicon_filt, const Vicon& vicon_vel, const Vicon& vicon_vel_filt, const Angles& desired_angles, const int joystick_thrust, const int flight_mode, const Times& times, const Times& time_m);
+void log_data(const Distances& sonar_distances, const float& dt, const Vicon& new_vicon, const Vicon& new_vicon_vel, const Vicon& new_filt_vicon, const Vicon& new_filt_vicon_vel, const State_Error& vicon_error, const State& imu_data, const State& imu_error, const Angles& desired_angles);
+void display_info(const Distances& sonar_distances, const int suc_read,  const State& imu_data, const State_Error& vicon_error, const State& imu_error, const Control_command& U, const Vicon& vicon, const Vicon& vicon_filt, const Vicon& vicon_vel, const Vicon& vicon_vel_filt, const Angles& desired_angles, const int joystick_thrust, const int flight_mode, const Times& times, const Times& time_m);
 void configure_threads(void);
 
 void set_timespec(timespec& x, timespec& y){
@@ -116,7 +115,6 @@ void set_timespec(timespec& x, timespec& y){
              x.tv_sec = y.tv_sec;
              x.tv_nsec = y.tv_nsec;
 }
-
 
 void time_calc(Times& times){
     //get current time, swap current and past, calc delta_t
@@ -172,6 +170,5 @@ void set_gains(Gains& gains){
     gains.ki_z = 5.0;
 
 }
-
 #endif 
 // __CONTROLLER_H_INCLUDED__

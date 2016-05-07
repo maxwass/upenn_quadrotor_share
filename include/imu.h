@@ -26,13 +26,10 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 */
 
-
 //=================================
 // include guard
 #ifndef IMU
 #define IMU
-
-
 
 //=================================
 // included dependenciesa
@@ -201,6 +198,7 @@ class Imu {
 
 		this->calibrated = true;
 		(this->gyro_bias) = gyro_bias;
+		printf("IN CALIBRATE \n\n");
 		return disable_motors;
 	} 
     
