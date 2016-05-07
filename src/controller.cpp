@@ -46,7 +46,7 @@ bool ESTOP = true;
 bool XConfig = true;
 bool AUTO_HEIGHT = false;
 bool DISPLAY_RUN = true;
-bool LOG_DATA = true;
+bool LOG_DATA = false;
 int VICON_OR_JOY = 0; // 1 = VICON, 0 = JOYSTICK
 int i2cHandle, usb_imu_ivn, usb_xbee;
 uint16_t display_count=0;
