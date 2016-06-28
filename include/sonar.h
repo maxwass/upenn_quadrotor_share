@@ -1,31 +1,3 @@
-/*
-Copyright (c) <2015>, <University of Pennsylvania:GRASP Lab>                                                             
-All rights reserved.
- 
-Redistribution and use in source and binary forms, with or without
-modification, are permitted provided that the following conditions are met:
-   * Redistributions of source code must retain the above copyright
-     notice, this list of conditions and the following disclaimer.
-   * Redistributions in binary form must reproduce the above copyright
-     notice, this list of conditions and the following disclaimer in the
-      documentation and/or other materials provided with the distribution.
-    * Neither the name of the university of pennsylvania nor the
-      names of its contributors may be used to endorse or promote products
-      derived from this software without specific prior written permission.
-
-THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
-ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
-WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
-DISCLAIMED. IN NO EVENT SHALL UNIVERSITY OF PENNSYLVANIA  BE LIABLE FOR ANY
-DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
-(INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
-LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
-ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
-SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-
-*/
-
 //=================================
 // include guard
 #ifndef SONAR
@@ -65,7 +37,13 @@ class Sonar {
 	float calc_dt;
 	bool which_port;
 	std::string PATH2SONAR;
+	bool first_call = true;
+	bool sonarStatus = true;	
 	
+	float sonarTimeout = 0.6;
+
+	int minDist, maxDist;
+
 	char lastByte = 255;
 	char dist[4] = {0};
 	int last_distance = 0;
@@ -79,7 +57,7 @@ class Sonar {
         struct timeval no_timeout;
 
 	public:
-	Sonar(std::string PATH2SONAR);
+	Sonar(std::string PATH2SONAR, int minDist, int maxDist);
 	int open_port(std::string PATH2SONAR, int DATASIZE);
 	int get_sonar_data(void);
 	int get_sonar_data(SonarTest& s);
@@ -89,6 +67,8 @@ class Sonar {
 	void printStats(void);
 	void print_raw_bytes(const char arr[], int arr_length);
 	void calcDt(void);
+	float timeSinceLastRead(void);
+	int getStatus(void);
 	float getDt(void);
 	int returnLastDistance(void);
 	int indexOfStartByte(const char arr[], int length);

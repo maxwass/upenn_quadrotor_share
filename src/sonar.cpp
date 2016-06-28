@@ -1,37 +1,15 @@
 #include "sonar.h"
 //g++ sonar.cpp logger.cpp -I ../include -std=c++11
-/*
-Copyright (c) <2015>, <University of Pennsylvania:GRASP Lab>                                                             
-All rights reserved.
- 
-Redistribution and use in source and binary forms, with or without
-modification, are permitted provided that the following conditions are met:
-   * Redistributions of source code must retain the above copyright
-     notice, this list of conditions and the following disclaimer.
-   * Redistributions in binary form must reproduce the above copyright
-     notice, this list of conditions and the following disclaimer in the
-      documentation and/or other materials provided with the distribution.
-    * Neither the name of the university of pennsylvania nor the
-      names of its contributors may be used to endorse or promote products
-      derived from this software without specific prior written permission.
 
-THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
-ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
-WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
-DISCLAIMED. IN NO EVENT SHALL UNIVERSITY OF PENNSYLVANIA  BE LIABLE FOR ANY
-DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
-(INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
-LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
-ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
-SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-
-*/
-
-Sonar::Sonar(std::string PATH2SONAR)
+Sonar::Sonar(std::string PATH2SONAR, int minDist, int maxDist)
 {
+
+	(this->minDist) = minDist;
+	(this->maxDist) = maxDist;
+
 	//(this->data_size) = DATASIZE; //including first and last checkbytes
 	open_port(PATH2SONAR, 1);
+	
 }
 int Sonar::open_port(std::string PATH2SONAR, int bytes_to_block)
 {
@@ -100,6 +78,12 @@ int Sonar::get_sonar_data(void)
     no_timeout.tv_sec  = 0;
     no_timeout.tv_usec = 0;
    
+    //initialize oldT for timeout purposes
+    if(first_call)
+    {
+	first_call = false;
+	clock_gettime(CLOCK_REALTIME,&oldT);
+    }
 
     return check_first_read();
 }
@@ -110,8 +94,22 @@ int Sonar::get_sonar_data(SonarTest& s)
     FD_SET(port, &read_fds);
     no_timeout.tv_sec  = 0;
     no_timeout.tv_usec = 0;
-   
-    return check_first_read_test(s);
+
+    //initialize oldT for timeout purposes
+    if(first_call)
+    {
+	first_call = false;
+	clock_gettime(CLOCK_REALTIME,&oldT);
+    }
+
+    
+    int toReturn = check_first_read_test(s);
+
+    if( (this->timeSinceLastRead()) > (this->sonarTimeout) ) (this->sonarStatus) = false;
+    else 						     (this->sonarStatus) = true;
+
+    return toReturn;
+
 }
 
 SonarTest Sonar::get_stats(void)
@@ -169,7 +167,7 @@ int Sonar::check_first_read_test(SonarTest& s)
 		(this->lastByte) = a;
 				if(result == 0) 
 		{
-			printf("read 0 bytes \n");
+			//printf("sonar: read 0 bytes \n");
 			clean();
 			returnVal = -3;
 		}
@@ -354,8 +352,15 @@ void Sonar::print_raw_bytes(const char arr[], int arr_length)
 
 	printf("\n\n\n");
 }
+float Sonar::timeSinceLastRead(void)
+{
+		//calculate time since last successful read
+		timespec currentTime;
+                clock_gettime(CLOCK_REALTIME,&currentTime);
+                return UTILITY::timespec2float(UTILITY::time_diff(oldT, currentTime));
+}
 void Sonar::calcDt(void){
-		//track dt between reads
+                //track dt between reads
                 clock_gettime(CLOCK_REALTIME,&newT);
                 (this->calc_dt) = UTILITY::timespec2float(UTILITY::time_diff(oldT, newT));
                 clock_gettime(CLOCK_REALTIME,&oldT);
@@ -369,17 +374,21 @@ int Sonar::indexOfStartByte(const char arr[], int arr_length)
 }
 float Sonar::getDt(void)
 {
-return this->calc_dt;
+	return this->calc_dt;
 }
 int Sonar::returnLastDistance(void)
 {
-return this->last_distance;
+	if(this->sonarStatus)   return (this->last_distance);
+	else 		  	return maxDist;
 }
-
 void Sonar::printStats(void)
 {
  
 printf("Not Ready to Read Count:  %ld, Ready to Read Count: %ld \n\n",  (this->num_fds_0), (this->num_fds_1));
+}
+int Sonar::getStatus(void)
+{
+	return this->sonarStatus;
 }
 /*
 int main()
