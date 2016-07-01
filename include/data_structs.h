@@ -1,31 +1,3 @@
-/*
-Copyright (c) <2015>, <University of Pennsylvania:GRASP Lab>                                                             
-All rights reserved.
- 
-Redistribution and use in source and binary forms, with or without
-modification, are permitted provided that the following conditions are met:
-   * Redistributions of source code must retain the above copyright
-     notice, this list of conditions and the following disclaimer.
-   * Redistributions in binary form must reproduce the above copyright
-     notice, this list of conditions and the following disclaimer in the
-      documentation and/or other materials provided with the distribution.
-    * Neither the name of the university of pennsylvania nor the
-      names of its contributors may be used to endorse or promote products
-      derived from this software without specific prior written permission.
-
-THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
-ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
-WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
-DISCLAIMED. IN NO EVENT SHALL UNIVERSITY OF PENNSYLVANIA  BE LIABLE FOR ANY
-DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
-(INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
-LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
-ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
-SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-
-*/
-
 //=================================
 // include guard
 #ifndef DATA_STRUCTS_H
@@ -53,9 +25,11 @@ long num_fds_n1, num_fds_0, num_fds_1, num_fds_p;
 
 //cal = calibrated, contin = continuous
 typedef struct state {
-float theta, phi, psi, psi_contin, theta_dot, phi_dot, psi_dot;
+float theta, phi, psi, psi_contin, psi_magn_raw, psi_magn_continuous, psi_magn_continuous_calibrated, theta_dot, phi_dot, psi_dot;
 float psi_cal, psi_contin_cal, theta_dot_cal, phi_dot_cal, psi_dot_cal;
 float psi_gyro_integration, psi_gyro_integration_cal;
+
+float altitude_raw_old, altitude_raw, altitude_calibrated, altitude_deriv, altitude_integral;
 int succ_read;
 float dt;
 float numPsiRot;
@@ -67,9 +41,6 @@ typedef struct repforces {
 float x_pos, x_neg, y_pos, y_neg, up, down;
 } RepForces;
 
-
-
- 
 typedef struct distances {
 //int one, two, three, four, five, six;
 int x_pos, x_neg, y_pos, y_neg, up, down;
@@ -77,7 +48,6 @@ int x_pos, x_neg, y_pos, y_neg, up, down;
 int succ_read;
 float dt;
 } Distances;
-
 
 typedef struct angles {
 float theta, phi, psi;
@@ -111,6 +81,7 @@ double roll_acc, pitch_acc, yaw_acc;
 
 typedef struct gains {
 double kp_theta, kd_theta, kp_phi, kd_phi, kp_psi, kd_psi, kp_x, kd_x, ki_x, kp_y, kd_y, ki_y, kp_z, kd_z, ki_z;
+float kp_altitude, kd_altitude, ki_altitude;
 } Gains; 
 
 typedef struct times {
@@ -154,6 +125,8 @@ RepForces scales;
 RepForces repulsive_forces;
 
 SonarTest sonar_test;
+int thrust;
+
 } Data_log;
 
 #endif

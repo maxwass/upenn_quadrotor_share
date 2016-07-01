@@ -1,8 +1,5 @@
-#include "logger.h"
-//need sudo to run exec
-
 /*
-Copyright (c) <2015>, <University of Pennsylvania:GRASP Lab>                                                             
+Copyright (c) <2015>, <University of Pennsylvania:GRASP Lab> 
 All rights reserved.
  
 Redistribution and use in source and binary forms, with or without
@@ -27,8 +24,10 @@ ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-*/
+*/ 
 
+#include "logger.h"
+//need sudo to run exec
 
 // Member functions definitions including constructor
 logger::logger(string filename, int cycles_until_log, bool LOG_DATA)
@@ -87,16 +86,17 @@ void logger::unwrap(Data_log d){
 	//motor	
 		myfile <<  "m1" <<  ", " << "m2" <<  ", " << "m3" <<  ", " << "m4" <<  ", ";        
 	//desired angles
+		myfile <<  "total_thrust"  <<  ", ";
 		myfile <<  "theta_des" <<  ", " << "phi_des" <<  ", " << "psi_des" <<  ", ";
 
 	//SonarTest
 		// myfile <<  "num_fds_n1"  << ", " <<  "num_fds_0" << ", " <<  "num_fds_1" << ", " << "num_fds_p" << ", " <<  "succ_read" << ", " <<  "distance" << ", " <<  "index" << ", " <<  "foundFirstByte" << ", " <<  "byte_read";
 
 	//Sonar Distances
-		myfile <<  "dist_x_pos"  << ", " <<  "dist_x_neg" << ", " <<  "dist_y_pos" << ", " << "dist_y_neg" <<  ", ";
+		myfile <<  "dist_x_pos"  << ", " <<  "dist_x_neg" << ", " <<  "dist_y_pos" << ", " << "dist_y_neg" <<  ", " <<  "dist_down" << ", " << "dist_up" << ", ";
 		
 	//Sonar Repulsive forces
-		 myfile <<  "scale_x_pos"  << ", " <<  "scale_x_neg" << ", " <<  "scale_y_pos" << ", " << "scale_y_neg";
+		 myfile <<  "scale_x_pos"  << ", " <<  "scale_x_neg" << ", " <<  "scale_y_pos" << ", " << "scale_y_neg" << ", " <<  "scale_down" << ", " << "scale_up";
 
 		 myfile << "\n";
 	}
@@ -109,6 +109,7 @@ void logger::unwrap(Data_log d){
    //this->format(d.read_error);	     myfile << ", ";
    this->format(d.imu);             myfile << ", ";
    // this->format(d.imu_error);       myfile << ", ";
+   this->format(d.thrust);		myfile << ", ";
    this->format(d.forces);          myfile << ", ";
    this->format(d.desired_angles);    myfile << ", "; 	
    this->format(d.sonar_distances);	myfile << ", ";
@@ -152,7 +153,7 @@ void logger::format(int read_error){
     myfile <<  num2str(read_error);
 }
 void logger::format(State imu){
-    myfile <<  num2str(imu.theta) <<  ", " << num2str(imu.phi) << ", " << num2str(imu.psi) << ", "  << num2str(imu.psi_gyro_integration) << ", "<<num2str(imu.theta_dot)<<  ", " <<num2str(imu.phi_dot)<< ", "<< num2str(imu.psi_dot) << ", " << num2str(100000*imu.dt)<< ", " << num2str(imu.numPsiRot);
+    myfile <<  num2str(imu.theta) <<  ", " << num2str(imu.phi) << ", " << num2str(imu.psi) << ", "  << num2str(imu.psi_gyro_integration) << ", "<<num2str(imu.theta_dot)<<  ", " <<num2str(imu.phi_dot)<< ", "<< num2str(imu.psi_dot) << ", " << num2str(100000*imu.dt) << ", " <<  num2str(imu.numPsiRot);
 }
 void logger::format(Motor_forces mf){
     myfile << num2str(mf.motor_1) << ", " << num2str(mf.motor_2) << ", " << num2str(mf.motor_3) << ", " << num2str(mf.motor_4);
@@ -164,10 +165,10 @@ void logger::format(Angles a){
     myfile << num2str(a.theta) << ", " << num2str(a.phi) << ", " << num2str(a.psi);
 }
 void logger::format(Distances a){
-    myfile << num2str(a.x_pos) << ", " << num2str(a.x_neg) << ", " << num2str(a.y_pos) << ", " << num2str(a.y_neg);
+    myfile << num2str(a.x_pos) << ", " << num2str(a.x_neg) << ", " << num2str(a.y_pos) << ", " << num2str(a.y_neg) << ", " << num2str(a.down) << ", " << num2str(a.up);
 }
 void logger::format(RepForces a){
-    myfile << num2str(a.x_pos) << ", " << num2str(a.x_neg) << ", " << num2str(a.y_pos) << ", " << num2str(a.y_neg);
+    myfile << num2str(a.x_pos) << ", " << num2str(a.x_neg) << ", " << num2str(a.y_pos) << ", " << num2str(a.y_neg)<< ", " << num2str(a.down) << ", " << num2str(a.up);
 }
 
 

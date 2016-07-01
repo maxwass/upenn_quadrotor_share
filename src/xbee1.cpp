@@ -1,33 +1,6 @@
 #include "xbee1.h"
 //g++ xbee1.cpp logger.cpp -I ../include -std=c++11
 
-/*
-Copyright (c) <2015>, <University of Pennsylvania:GRASP Lab>                                                             
-All rights reserved.
- 
-Redistribution and use in source and binary forms, with or without
-modification, are permitted provided that the following conditions are met:
-   * Redistributions of source code must retain the above copyright
-     notice, this list of conditions and the following disclaimer.
-   * Redistributions in binary form must reproduce the above copyright
-     notice, this list of conditions and the following disclaimer in the
-      documentation and/or other materials provided with the distribution.
-    * Neither the name of the university of pennsylvania nor the
-      names of its contributors may be used to endorse or promote products
-      derived from this software without specific prior written permission.
-
-THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
-ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
-WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
-DISCLAIMED. IN NO EVENT SHALL UNIVERSITY OF PENNSYLVANIA  BE LIABLE FOR ANY
-DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
-(INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
-LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
-ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
-SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-
-*/
 Xbee::Xbee(std::string PATH2XBEE, int DATASIZE)
 {
         open_port(PATH2XBEE, DATASIZE);
@@ -79,13 +52,178 @@ int Xbee::open_port(std::string PATH2XBEE, int DATASIZE)
 
     (this->port) = port;
     (this->PATH2XBEE) = PATH2XBEE;
-    (this->DATASIZE) = DATASIZE; //including first and last checkbytes
+    (this->DATASIZE)  = DATASIZE; //including first and last checkbytes
 
     if (port < 0)  printf("\n Error opening XBEE USB port: %i !!", port);
     else   	   printf("Done!\n");
     printf("	Port Name: %i \n", port);
 
     return port;
+}
+int Xbee::get_xbee_data(void)
+{
+    // select returns the number of fd's ready
+    FD_ZERO(&read_fds);
+    FD_SET(port, &read_fds);
+    no_timeout.tv_sec  = 0;
+    no_timeout.tv_usec = 0;
+
+   int num_fds = select(port+1, &read_fds, NULL, NULL, &no_timeout);  
+   int returnVal= -10; 
+   if(num_fds == -1)      (this->num_fds_n1)++; 
+   else if (num_fds == 0) (this->num_fds_0)++; 
+   else if (num_fds == 1) (this->num_fds_1)++;  
+   else if (num_fds > 1)  (this->num_fds_p)++; 
+  //No data ready to read 
+    	if(num_fds == 0)   
+    	{	 
+		returnVal= -1; 
+		return -1; 
+    	} 
+    	//select returned an error 
+    	else if(num_fds ==-1) 
+    	{ 
+		returnVal= -2; 
+		return -2; 
+    	} 
+	else if(num_fds ==1)
+	{
+		lseek(port, -(this->DATASIZE), SEEK_END);
+
+		uint8_t  data_received[DATASIZE];
+		int result = read(port, &data_received[0], DATASIZE);
+		
+		int16_t checksum_calc = checksum(data_received, DATASIZE);
+		
+		//printf("result: %i\n", result);
+		//print_raw_bytes(data_received, DATASIZE);
+
+
+		//CHECK BYTES MAY BE DIFFERENT FOR VICON
+		bool check1_correct =  (  data_received[0] == 253);
+ 		//bool check2_correct =  (  data_received[DATASIZE-2] == 173);
+ 		bool checksum_correct = (checksum_calc > 0); 	
+
+
+		if(result == 0)
+		{
+			printf("xbee: read 0 bytes \n");
+		//	clean();
+			returnVal = -3;
+		}
+
+		if( (checksum_calc > 0) && ( check1_correct ) )
+		{
+
+			calcDt();
+			Vicon vicon = {0.0};
+			//unpack_vicon_data(vicon,data_received);UNCOMMENT AND FIX!!!
+
+			(this->new_vicon) 	   = vicon;
+			(this->new_filt_vicon) 	   = filter_vicon(vicon, this->weights);
+			
+			(this->new_vicon) 	   = vicon_velocity(this->new_vicon, this->old_vicon, this->getDt()); 
+			(this->new_filt_vicon_vel) = vicon_velocity(this->new_filt_vicon, this->old_filt_vicon, this->getDt());
+
+			pushback(this->new_vicon, this->old_vicon, this->old_old_vicon);
+			pushback(this->new_filt_vicon, this->old_filt_vicon, this->old_old_filt_vicon);
+			pushback(this->new_vicon_vel,this->old_vicon_vel, this->old_old_vicon_vel); 	
+			pushback(this->new_filt_vicon_vel, this->old_filt_vicon_vel,  this->old_old_filt_vicon_vel);
+
+					 
+			returnVal = 1;
+		}
+		 else
+		{
+			if (result == -1) printf("get_xbee_data: FAILED read from port \n");
+			 //printf("\n\n\x1b[31mFIRST BYTE OR CHECKSUM WRONG:FLUSHED PORT\x1b[0m\n\n");
+
+			tcflush(port, TCIFLUSH);
+
+			if(checksum_calc < 0) 		      returnVal = -4;
+			else if(!(  data_received[0] == 253)) returnVal = -5;  //check bytes??
+			else if(!(  data_received[6] == 173)) returnVal = -6;  //check bytes??
+			else 				      returnVal = -1;
+		}
+	}
+
+	return returnVal;
+
+}
+
+Vicon Xbee::filter_vicon(Vicon& new_vicon, Weights& weights)
+{
+	Vicon filtered_vicon = {0.0};
+
+	filtered_vicon.x =     UTILITY::filter(new_vicon.x, this->old_vicon.x, this->old_old_vicon.x, this->weights);
+	filtered_vicon.y =     UTILITY::filter(new_vicon.y, this->old_vicon.y, this->old_old_vicon.y, this->weights);
+	filtered_vicon.z =     UTILITY::filter(new_vicon.z, this->old_vicon.z, this->old_old_vicon.z, this->weights);
+	filtered_vicon.theta = UTILITY::filter(new_vicon.theta, this->old_vicon.theta, this->old_old_vicon.theta, this->weights);
+	filtered_vicon.phi =   UTILITY::filter(new_vicon.phi, this->old_vicon.phi, this->old_old_vicon.phi, this->weights);
+	filtered_vicon.psi =   UTILITY::filter(new_vicon.psi, this->old_vicon.psi, this->old_old_vicon.psi, this->weights);
+
+	
+	return filtered_vicon; 
+
+}
+Vicon Xbee::vicon_velocity(Vicon& current, Vicon& old, float dt){
+
+    Vicon velocity = {0.0};
+    velocity.x     = (current.x - old.x)/dt;
+    velocity.y     = (current.y - old.y)/dt;
+    velocity.z     = (current.z - old.z)/dt;
+    velocity.theta = (current.theta - old.theta)/dt;
+    velocity.phi   = (current.phi - old.phi)/dt;
+    velocity.psi   = (current.psi - old.psi)/dt;
+
+    
+    return velocity;
+}
+void Xbee::pushback(Vicon& new_vicon, Vicon& old_vicon, Vicon& old_old_vicon){
+    old_old_vicon = old_vicon;
+    old_vicon = new_vicon;
+}
+State_Error Xbee::error_vicon(State_Error& error, const Vicon &desired_velocity, const Positions& desired_positions)
+{ 
+    //proportional errors:  desired_positions - filtered_positions 
+    error.x.prop = desired_positions.x - this->new_filt_vicon.x; 
+    error.y.prop = desired_positions.y - this->new_filt_vicon.y; 
+    error.z.prop = desired_positions.z - this->new_filt_vicon.z; 
+        
+    //derivative errors: desired_velocities - filtered_velocities 
+    error.x.deriv = desired_velocity.x - this->new_filt_vicon_vel.x; 
+    error.y.deriv = desired_velocity.y - this->new_filt_vicon_vel.y; 
+    error.z.deriv = desired_velocity.z - this->new_filt_vicon_vel.z; 
+        
+    //integral errors: integral error + (proportional error * delta_t) 
+    error.x.integral += error.x.prop * (this->getDt()); 
+    error.y.integral += error.y.prop * (this->getDt()); 
+    error.z.integral += error.z.prop * (this->getDt()); 
+
+}
+Vicon Xbee::getLastVicon(void)
+{
+	Vicon v = {0.0};
+	v = this->new_vicon;
+	return v;
+}
+Vicon Xbee::getLastFiltVicon(void) 
+{
+	Vicon v = {0.0};
+        v = this->new_filt_vicon;
+        return v;
+}
+Vicon Xbee::getLastViconVel(void)
+{
+	Vicon v = {0.0};
+        v = this->new_vicon_vel;
+        return v;
+} 
+Vicon Xbee::getLastFiltViconVel(void)
+{
+	Vicon v = {0.0};
+        v = this->new_filt_vicon_vel;
+        return v;
 }
 int Xbee::get_xbee_data(Angles& joystick_des_angles, uint8_t& joystick_thrust, uint8_t& flight_mode)
 {
@@ -94,6 +232,13 @@ int Xbee::get_xbee_data(Angles& joystick_des_angles, uint8_t& joystick_thrust, u
     FD_SET(port, &read_fds);
     no_timeout.tv_sec  = 0;
     no_timeout.tv_usec = 0;
+
+    //initialize oldT for timeout purposes
+    if(first_call) 
+    { 
+        first_call = false; 
+        clock_gettime(CLOCK_REALTIME,&oldT); 
+    }
 
     return get_xbee_helper(joystick_des_angles, joystick_thrust, flight_mode);
 }
@@ -176,6 +321,18 @@ void Xbee::unpack_joystick_data(Angles& joystick_des_angles, uint8_t& joystick_t
 	joystick_des_angles.theta = ( (float) joystick_des_angles.theta /  attenuation);
 }
 
+void Xbee::unpack_vicon_data(Vicon &vicon_data, float arr[])
+{
+	//      cout << "enter unpack_vicon_data" << endl;
+        vicon_data.x =     arr[0];
+        vicon_data.y =     arr[1];
+        vicon_data.z =     arr[2];
+        vicon_data.phi =   arr[3];
+        vicon_data.theta = arr[4];
+        vicon_data.psi =   arr[5];
+//      cout << "exit unpack_vicon_data" << endl;
+
+}
 int Xbee::checksum(const uint8_t arr[], int arr_length){
          int checksum_calc = 0;
          for(int i = 0; i < arr_length-2; i++) checksum_calc+= (int8_t) arr[i];
@@ -271,6 +428,14 @@ float Xbee::calcDt(timespec& oldT, timespec& newT){
 float Xbee::getDt(void)
 {
 		return this->calc_dt;
+}
+float Xbee::timeSinceLastRead(void)
+{
+                //calculate time since last successful read
+                timespec currentTime;
+                clock_gettime(CLOCK_REALTIME,&currentTime);
+		//printf("xbee time %f \n",UTILITY::timespec2float(UTILITY::time_diff(this->oldT, currentTime)));
+                return UTILITY::timespec2float(UTILITY::time_diff(this->oldT, currentTime));
 }
 void Xbee::printStats(void) 
 { 

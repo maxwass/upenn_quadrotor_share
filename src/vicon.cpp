@@ -1,37 +1,8 @@
 #include "vicon.h"
 //compilation requres -pthread option
-//g++ vicon.cpp utility.cpp -I /home/odroid/upenn_quad/include -lpthread
+//g++ vicon.cpp utility.cpp -I ../include -lpthread
 //#include "Xbee.h"
 //#include "receiver.h"
-
-/*
-Copyright (c) <2015>, <University of Pennsylvania:GRASP Lab>                                                             
-All rights reserved.
- 
-Redistribution and use in source and binary forms, with or without
-modification, are permitted provided that the following conditions are met:
-   * Redistributions of source code must retain the above copyright
-     notice, this list of conditions and the following disclaimer.
-   * Redistributions in binary form must reproduce the above copyright
-     notice, this list of conditions and the following disclaimer in the
-      documentation and/or other materials provided with the distribution.
-    * Neither the name of the university of pennsylvania nor the
-      names of its contributors may be used to endorse or promote products
-      derived from this software without specific prior written permission.
-
-THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
-ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
-WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
-DISCLAIMED. IN NO EVENT SHALL UNIVERSITY OF PENNSYLVANIA  BE LIABLE FOR ANY
-DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
-(INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
-LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
-ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
-SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-
-*/
-
 
 int usb_xbee_fd;
 int select_usb_xbee_fd;
@@ -53,6 +24,7 @@ timespec total_start_v, total_current_v;
 double total_seconds_v, total_sum_v=0;
 
 int NUM_JOY_BYTES=9;
+
 using namespace std;
 
 void get_vicon_data(int port, Vicon& vicon_data)
@@ -71,7 +43,6 @@ float data_received[5] = {0.0};
 recieve_data(port, data_received,5);
 unpack_joystick_data(joystick_des_angles, joystick_thrust, flight_mode, data_received);
 }
-
 int select_get_joystick_data(int port, Angles& joystick_des_angles, uint8_t& joystick_thrust, uint8_t& flight_mode)
 {
 //select: clear read_ds(set of file_descriptors to watch for reading), add port to this set, set time to 0 to returnimmediately,
@@ -117,7 +88,7 @@ else if(num_fds ==-1)  {
 a = -3;        
 }              
 //3) A file descriptor is ready to read: check which one
-else if(FD_ISSET(port , &read_fds_v)) 
+else if(FD_ISSET(port , &read_fds_v))
 {
  //flush input buffer (TCI for input)
  //tcflush(port, TCIFLUSH);
@@ -133,7 +104,6 @@ else if(FD_ISSET(port , &read_fds_v))
  /////
 
 
-
  //read in NUM_JOY_BYTES bytes of data from port to the address in memory &data_received
  //result1 indicates success of reading
  int result = read(port, &data_received[0], NUM_JOY_BYTES);
@@ -146,8 +116,10 @@ else if(FD_ISSET(port , &read_fds_v))
  bool check1_correct =  (  data_received[0] == 253);
  bool check2_correct =  (  data_received[6] == 173);
  bool checksum_correct = (checksum_calc > 0);
-
-          if( (checksum_calc > 0) && (  data_received[0] == 253) && (  data_received[6] == 173) ) 
+ 
+//s_print_raw_bytes(data_received, NUM_JOY_BYTES);
+          
+	if( (checksum_calc > 0) && (  data_received[0] == 253) && (  data_received[6] == 173) ) 
         {          
                  select_unpack_joystick_data(  joystick_des_angles,  joystick_thrust, flight_mode, data_received);
                  a = 1;
@@ -278,6 +250,7 @@ void unpack_joystick_data(Angles& joystick_des_angles, float& joystick_thrust,fl
 	flight_mode     	  = arr[4]; 	    
 
 }
+
 void select_unpack_joystick_data(Angles& joystick_des_angles, int8_t& joystick_thrust, int8_t& flight_mode, int8_t arr[]){
 	float scale = 3;
         
@@ -293,6 +266,8 @@ void select_unpack_joystick_data(Angles& joystick_des_angles, int8_t& joystick_t
     //joystick_des_angles.phi   = ( (float) joystick_des_angles.phi /  4.0); /// DELETE THIS AFTER RESCALING
     //joystick_des_angles.theta = ( (float) joystick_des_angles.theta /  4.0);
 }
+
+
 void select_unpack_joystick_data(Angles& joystick_des_angles, uint8_t& joystick_thrust, uint8_t& flight_mode, uint8_t arr[]){
 	joystick_thrust	            = (int8_t) arr[1] + 75 ; // thrust
 	joystick_des_angles.phi     = (int8_t) arr[2]; // roll
@@ -307,6 +282,7 @@ void select_unpack_joystick_data(Angles& joystick_des_angles, uint8_t& joystick_
     joystick_des_angles.phi   = ( (float) joystick_des_angles.phi /  4.0); /// DELETE THIS AFTER RESCALING
     joystick_des_angles.theta = ( (float) joystick_des_angles.theta /  4.0);
 }
+
 Vicon filter_vicon_data(Vicon& new_vicon, Vicon& old_vicon, Vicon& old_old_vicon ,Weights& weights){
     //cout << "filtering vicon data" << endl;
 
@@ -377,7 +353,7 @@ int open_xbee_port()
 
   struct termios newtio;
   int port; /* File descriptor for the port */
-  string MY_PATH = "/dev/ttyUSB0";
+  string MY_PATH = "/dev/ttyUSB1";
 
   port = open(MY_PATH.c_str(), O_RDWR | O_NOCTTY);
   printf("Opening an USB port...   ");//Opens the usb Port

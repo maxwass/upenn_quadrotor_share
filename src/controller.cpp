@@ -1,7 +1,3 @@
- #include "controller.h"
-//g++ controller.cpp imu.cpp sonar.cpp xbee1.cpp vicon.cpp motor.cpp logger.cpp utility.cpp -I ../include -lpthread -lncurses -lboost_system -std=c++11
-//initialize process-scoped data-structures
-
 /*
 Copyright (c) <2015>, <University of Pennsylvania:GRASP Lab>                                                             
 All rights reserved.
@@ -28,261 +24,235 @@ ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-*/
+*/ 
 
+
+#include "controller.h"
+//g++ controller.cpp imu.cpp sonar.cpp xbee1.cpp vicon.cpp motor.cpp logger.cpp utility.cpp -I ../include -lpthread -lncurses -lboost_system -std=c++11
+//initialize process-scoped data-structures
 Times times;
 Times time_m;
 Times times_display;
 
 Positions init_positions = {0.0};
 Positions desired_positions = {0.0};
+
 Gains gains= {0.0};
 Control_command U_trim = {0};
+double Ct=0.013257116418667*10;
+double d=0.169;
 
 bool MAGN = false;
 bool SYSTEM_RUN = true;
-bool CONTROLLER_RUN = false;
-bool ESTOP = true;
+bool CONTROLLER_RUN = true;
+bool ESTOP = false;//true;
 bool XConfig = true;
 bool AUTO_HEIGHT = false;
 bool DISPLAY_RUN = true;
-bool LOG_DATA = false;
-int VICON_OR_JOY = 0; // 1 = VICON, 0 = JOYSTICK
+bool LOG_DATA = true;
+
 int i2cHandle, usb_imu_ivn, usb_xbee;
 uint16_t display_count=0;
-bool SONAR_BUBBLE = true;
-int repulsion_factor = 15;
+bool SONAR_BUBBLE_SIDES = false;
+bool SONAR_BUBBLE_DOWN =  false;
+bool SONAR_BUBBLE_UP   =  false;
+
+int repulsion_factor = 10;
+int repulsion_factor_down = 20;
+int repulsion_factor_up = 20;
 int minDist = 500;
-int maxDist = 2000;
+int maxDist = 1500;
+
+int minDistDown = 300;
+int maxDistDown = 1000;
+int minDistUp = 300;
+int maxDistUp = 1000;
+
+float desired_altitude, desired_altitude_deriv, altitude_integral_error = 0.0;
+
 
 int aa = 0;
-timespec s,f;
-timespec dd,tt;
 int port;
 
 std::string log_filename = "file.log";
 logger logger(log_filename, 10, LOG_DATA);
 
 //create our motor objects - accesible from all threads
-motor motor_1(1, 0x29); //0x2f
-motor motor_2(2, 0x2c); //0x2d
-motor motor_3(3, 0x2a); //0x30
-motor motor_4(4, 0x2b); //0x2e
+//on this particular quadrotor the Body Frame is defined as follows:
+//+x is between motors (0x2b , 0x29), +y is between (0x29 , 0x2c), 
+//and by the right hand rule, +z is down.
 
-SonarTest x_pos ={0}, x_neg ={0}, y_pos ={0}, y_neg ={0}; 
+//+x is between motor_1 and motor_4
+//+y is between motor
+std::string PATH2MOTOR = "/dev/i2c-1";
+motor motor_1(PATH2MOTOR,1, 0x2c); //motor motor_1(1, 0x29); //0x2f
+motor motor_2(PATH2MOTOR,2, 0x29);//motor motor_2(2, 0x2c); //0x2d
+motor motor_3(PATH2MOTOR,3, 0x2b);//motor motor_3(3, 0x2a); //0x30
+motor motor_4(PATH2MOTOR,4, 0x2a);//motor motor_4(4, 0x2b); //0x2e
 
-Sonar sonar_x_pos("/dev/ttyUSB1");
-Sonar sonar_x_neg("/dev/ttyUSB2");
-Sonar sonar_y_pos("/dev/ttyUSB0");
-Sonar sonar_y_neg("/dev/ttyUSB4");
+SonarTest x_pos ={0}, x_neg ={0}, y_pos ={0}, y_neg ={0}, down = {0}, up = {0}; 
+
+Sonar sonar_x_pos("/dev/ttyUSB1", minDist, maxDist);
+Sonar sonar_x_neg("/dev/ttyUSB3", minDist, maxDist);
+Sonar sonar_y_pos("/dev/ttyUSB0", minDist, maxDist);
+Sonar sonar_y_neg("/dev/ttyUSB5", minDist, maxDist);
+Sonar sonar_down("/dev/ttyUSB6",  minDistDown, maxDistDown);
+Sonar sonar_up("/dev/ttyUSB2",    minDistDown, maxDistDown);
 
 std::string path = "/dev/ttyACM0";
-Imu imu(path, 26, .007);
+Imu imu(path, 42, .007);
 
-Xbee joystick("/dev/ttyUSB3",9);
+//Imu imu(path, 2, .007);
+
+
+int VICON_OR_JOY = 0; // 1 = VICON, 0 = JOYSTICK, 2 = both
+
+Xbee xbee("/dev/ttyUSB4",9);
+Timer timerController;
 
 #define ncurse 1
 #if ncurse ==1
 	#define printf(...) printw(__VA_ARGS__)
 #endif
 
-void *control_stabilizer(void *thread_id){
+void *control_stabilizer(void *thread_id)
+{
 
-printf("in control stabilizer \n");
-    State imu_data;
-    int range_sonar_1, range_sonar_2, range_sonar_3, range_sonar_4; 
-    
-    Distances sonar_distances;
-    Distances repulsive_forces;
-    //weights is used for filter: current, one value ago, 2 values ago
-    Weights weights = {.7,.2,.1};
+	printf("in control stabilizer \n");
+	State imu_data;
 
-    //for error calculations PID: stores the actual errors, not gains
-    State_Error vicon_error = {0.0};
-    
-    //position from raw data
-    Vicon new_vicon,          old_vicon,          old_old_vicon          = {0};  
-    Vicon new_filt_vicon,     old_filt_vicon,     old_old_filt_vicon     = {0};
+	Distances sonar_distances;
+	Distances repulsive_forces;
+	//weights is used for filter: current, one value ago, 2 values ago
+	//Weights weights = {.7,.2,.1};
 
-    //velocity from raw data
-    Vicon new_vicon_vel,      old_vicon_vel,      old_old_vicon_vel      = {0};
-    Vicon new_filt_vicon_vel, old_filt_vicon_vel, old_old_filt_vicon_vel = {0};
+	//for error calculations PID: stores the actual errors, not gains
+	State_Error vicon_error = {0.0};
+	Vicon desired_velocity = {0.0}; 
 
-//for display
-    State imu_error = {0};
-    Control_command U = {0};
-    Angles desired_angles = {0};
-    uint8_t joystick_thrust , flight_mode = 0;
-    int succ_read;
-    int new_xbee_data, new_imu_data, new_sonar_data_x_pos, new_sonar_data_x_neg, new_sonar_data_y_pos, new_sonar_data_y_neg;
-    times.delta.tv_nsec = delta_time; //500000;
-
-	clock_gettime(CLOCK_REALTIME,&s);
-	clock_gettime(CLOCK_REALTIME,&f);
-    	clock_gettime(CLOCK_REALTIME,&dd);
-        clock_gettime(CLOCK_REALTIME,&tt);
+	State imu_error = {0};
+	Control_command U = {0};
+	Angles desired_angles = {0};
 	
-while(SYSTEM_RUN) {
+	uint8_t joystick_thrust , flight_mode = 0;
+	int succ_read;
+	int new_xbee_data, new_imu_data, new_motor_write, new_sonar_data_x_pos, new_sonar_data_x_neg, new_sonar_data_y_pos, new_sonar_data_y_neg, new_sonar_data_down, new_sonar_data_up;
+	times.delta.tv_nsec = delta_time; //500000;
+
+	double force_m1, force_m2, force_m3, force_m4 = 0.0;
+
+while(SYSTEM_RUN) 
+  {
 	//calc new times and delta
-	float dt = UTILITY::calcDt(dd,tt);    
-	//time_calc(times_display);
+	float dt = timerController.update();  
 
 	new_sonar_data_x_pos = sonar_x_pos.get_sonar_data(x_pos);
 	new_sonar_data_x_neg = sonar_x_neg.get_sonar_data(x_neg);
 	new_sonar_data_y_pos = sonar_y_pos.get_sonar_data(y_pos);
 	new_sonar_data_y_neg = sonar_y_neg.get_sonar_data(y_neg);
-
+	new_sonar_data_down  = sonar_down.get_sonar_data(down);
+	new_sonar_data_up    = sonar_up.get_sonar_data(up);
 	//reads input from imu (in degrees), distributes into fields of imu_data
 	//get_imu_data returns 1 if read successful,< 0 if not. Reuse old values if not successful
 	int new_imu_data = imu.get_imu_calibrated_data(imu_data);
 	
 
+
 	//can switch between psi estimators
 	if(!MAGN) imu_data.psi = imu_data.psi_gyro_integration;
+	else 	  imu_data.psi = imu_data.psi_magn_continuous_calibrated;
 
 	if (VICON_OR_JOY == 1)
 	{
 		printf("in vicon part");
-		//get_vicon_data(usb_xbee, new_vicon);
+		new_xbee_data = xbee.get_xbee_data();
 
-		new_filt_vicon = filter_vicon_data(new_vicon, old_vicon, old_old_vicon, weights);
-
-		//calc velocities from vicon
-		new_vicon_vel = vicon_velocity(new_filt_vicon, old_filt_vicon);
-		//filter velocities
-		new_filt_vicon_vel = filter_vicon_data(new_vicon_vel, old_vicon_vel, old_old_vicon_vel, weights);       
-		//set old_old data to old_data, and old_data to new data
-		//vicon data
-		pushback(new_vicon,      old_vicon,      old_old_vicon);
-		pushback(new_filt_vicon, old_filt_vicon, old_old_filt_vicon);
-
-		//calculated vicon velocities
-		pushback(new_vicon_vel,      old_vicon_vel,      old_old_vicon_vel);
-		pushback(new_filt_vicon_vel, old_filt_vicon_vel, old_old_filt_vicon_vel);
-
-		//calculate error from vicon
-		error_vicon(vicon_error, new_filt_vicon, new_filt_vicon_vel, desired_positions,times);	
-
-		//calculate desired attitude (phi theta phi) in desired_angles
-		desired_angles_calc(desired_angles, vicon_error, gains);
+		if(new_xbee_data)
+		{
+			//calculate error from vicon
+			xbee.error_vicon(vicon_error, desired_velocity, desired_positions);	
+			//calculate desired attitude (phi theta phi) in desired_angles
+			desired_angles_calc(desired_angles, vicon_error, gains);
+		}
 	}	
 	else
 	{
 		Angles old_desired_angles = desired_angles;
 		//get joystick data => desired angles
 		//new_xbee_data = select_get_joystick_data(usb_xbee, desired_angles, joystick_thrust, flight_mode);
-		new_xbee_data = joystick.get_xbee_data(desired_angles,joystick_thrust,flight_mode);
-
-
+		new_xbee_data = xbee.get_xbee_data(desired_angles,joystick_thrust,flight_mode);
 		if(new_xbee_data < 0) ; //printf("joystick not ready to read: old data");
 		//check flight mode
 		    if(ESTOP)
 		    {
 			    if(flight_mode < 11.0) 
-				{
-					//printf("FLIGHT MODE: OFF %i \n", flight_mode); 
-					CONTROLLER_RUN = false;
-				}
-			    else if (flight_mode > 15.0 && flight_mode < 17.0) AUTO_HEIGHT = false;
-			    else if (flight_mode > 17.0) AUTO_HEIGHT = true;
+			    {
+				CONTROLLER_RUN = false;
+				SONAR_BUBBLE_SIDES = false;
+				SONAR_BUBBLE_DOWN  = false;
+				SONAR_BUBBLE_UP    =  false;   
+				AUTO_HEIGHT = false;
+				altitude_integral_error = 0.0;
+			
+			    }
+			    else if (flight_mode > 15.0 && flight_mode < 17.0) 
+			    {
+				//SONAR_BUBBLE_SIDES = false;
+                                //SONAR_BUBBLE_DOWN = false;
+                                //SONAR_BUBBLE_UP   =  false;	
+				AUTO_HEIGHT = false;
+				altitude_integral_error = 0.0;
+		            }
+			    else if (flight_mode > 17.0 && flight_mode < 19.0)
+			    {
+				//SONAR_BUBBLE_SIDES = true;
+				//SONAR_BUBBLE_DOWN =  true;
+				//SONAR_BUBBLE_UP   =  true;
+				AUTO_HEIGHT = true;
+				altitude_integral_error = 0.0;
+				desired_altitude = imu_data.altitude_calibrated;		
+			    }
 		    }
 	}
 
 	//calculate error from imu (in radians) between desired and measured state
 	State imu_error = error_imu(imu_data, desired_angles);
-
 	//calculate thrust and desired acceleration
 	U = thrust(imu_error,vicon_error, U_trim, joystick_thrust, gains);
-
 	//calculate the forces of each motor and change force on motor objects and send via i2c 
-	set_forces(U,Ct,d);
-
+	distribute_forces(U, Ct, d, force_m1, force_m2, force_m3, force_m4);
+	new_motor_write = send_forces(force_m1, force_m2, force_m3, force_m4);
 	//printf("BOOOOL: %i\n", (LOG_DATA && ( (new_xbee_data>0) || (new_imu_data>0) || (new_sonar_data_1>0) || (new_sonar_data_2>0) || (new_sonar_data_3>0) || (new_sonar_data_4>0) ) ) );
-	if (LOG_DATA && ( (new_xbee_data>0) || (new_imu_data>0) || (new_sonar_data_x_pos>0) || (new_sonar_data_x_neg>0) || (new_sonar_data_y_pos>0) || (new_sonar_data_y_neg>0) ) )   
-	//if(true)
+	if (LOG_DATA && ( (new_xbee_data>0) || (new_imu_data>0) || (new_sonar_data_x_pos>0) || (new_sonar_data_x_neg>0) || (new_sonar_data_y_pos>0) || (new_sonar_data_y_neg>0) ) || (new_sonar_data_down>0) )   
 	{
-	 clock_gettime(CLOCK_REALTIME,&f);
-	 //printf("freq new data is available: %f \n", 1/joystick.calcDt(s,f));
-	 clock_gettime(CLOCK_REALTIME,&s);
-	 //printf("number of times new data is available: %i \n", aa++);
-	log_data(sonar_distances, dt, new_vicon, new_vicon_vel, new_filt_vicon, new_filt_vicon_vel, vicon_error, imu_data, imu_error, desired_angles);       
+		log_data(sonar_distances, dt,  vicon_error, imu_data, imu_error, desired_angles, U.thrust);       
 	}
 	if (DISPLAY_RUN) 
 	{ 
-	display_info(sonar_distances, new_xbee_data,  imu_data, vicon_error, imu_error, U, new_vicon, new_filt_vicon, new_vicon_vel, new_filt_vicon_vel, desired_angles,joystick_thrust, flight_mode, times_display, time_m); 
+		display_info(sonar_distances, new_xbee_data,  imu_data,  imu_error, vicon_error, U, desired_angles,joystick_thrust, flight_mode, times_display, time_m); 
 	}
 
-}
- 
+ }
     printf("EXIT CONTROL_STABILIZER\n");
     pthread_exit(NULL);
 
 }
 
-void desired_angles_calc(Angles& desired_angles, const State_Error& error, const Gains& gains){
+void desired_angles_calc(Angles& desired_angles, const State_Error& error, const Gains& gains)
+{
 
     desired_angles.psi     = 0;
     desired_angles.phi     =  gains.kp_y*error.y.prop - gains.kd_y*error.y.deriv + gains.ki_y*error.y.integral; //5.y_pos_sensor - 5*y_neg_sensor
     desired_angles.theta   = -gains.kp_x*error.x.prop + gains.kd_x*error.x.deriv - gains.ki_x*error.x.integral; //5.x_pos_sensor - 5*x_neg_sensor
 
 }
-State_Error error_vicon(State_Error& error, const Vicon& pos_filt, const Vicon& vel_filt, const Positions& desired_positions, const Times& times){
-       
-    //proportional errors:  desired_positions - filtered_positions
-    error.x.prop = desired_positions.x - pos_filt.x;
-    error.y.prop = desired_positions.y - pos_filt.y;
-    error.z.prop = desired_positions.z - pos_filt.z;
-       
-    //derivative errors: desired_velocities - filtered_velocities
-    error.x.deriv = 0 - vel_filt.x;
-    error.y.deriv = 0 - vel_filt.y;
-    error.z.deriv = 0 - vel_filt.z;
-       
-    //integral errors: integral error + (proportional error * delta_t)
-    error.x.integral = error.x.integral + (error.x.prop * tv2float(times.delta));
-    error.y.integral = error.y.integral + (error.y.prop * tv2float(times.delta));
-    error.z.integral = error.z.integral + (error.z.prop * tv2float(times.delta));
 
-}
-
-void *motor_signal(void *thread_id){
-
-   //printf("INSIDE MOTOR_SIGNAL\n");
-   set_initial_times(time_m);
-
-      while(SYSTEM_RUN){
-	//printf("in motor loop");
-	motor_1.send_force_i2c();
-	motor_2.send_force_i2c();
-	motor_3.send_force_i2c();
-	motor_4.send_force_i2c();
-
-    	time_calc(time_m);
-	
-	//sets frequency of motor_signal
-	usleep(10);
-	}
-
-   printf("EXIT MOTOR_SIGNAL\n");
-
-   pthread_exit(NULL);
-}
-
-
-void start_motors(void){
-    //set speed to 30 out of 255
-    printf("Starting Motors ...\n");
-    motor_1.set_force(30, CONTROLLER_RUN);
-    motor_2.set_force(30, CONTROLLER_RUN);
-    motor_3.set_force(30, CONTROLLER_RUN);
-    motor_4.set_force(30, CONTROLLER_RUN);
-}
 void stop_motors(void){
     printf("Stopping Motors ...\n");
-    motor_1.set_force(0, false);
-    motor_2.set_force(0, false);
-    motor_3.set_force(0, false);
-    motor_4.set_force(0, false);
+    motor_1.send_motor_data(0, false);
+    motor_2.send_motor_data(0, false);
+    motor_3.send_motor_data(0, false);
+    motor_4.send_motor_data(0, false);
 }
 
 void controller_on_off(bool &CONTROLLER_RUN){
@@ -308,39 +278,64 @@ void display_on_off(bool& DISPLAY_RUN){
 State error_imu(const State& imu_data, const Angles& desired_angles){
     //calculate error in RADIANS
     //  xxx_d is xxx_desired.  imu outputs  degrees, we convert to radians with factor PI/180
-    // 
+    
     State error;
     error.phi    =  (desired_angles.phi   - imu_data.phi)      * PI/180;
-    error.theta  =  (desired_angles.theta - imu_data.theta)   * PI/180;
+    error.theta  =  (desired_angles.theta - imu_data.theta)    * PI/180;
 
-    if (SONAR_BUBBLE)
+    if (SONAR_BUBBLE_SIDES)
     {
 	 error.phi   += repulsion_factor*(UTILITY::dist2ScaleInv(sonar_y_neg.returnLastDistance(), minDist, maxDist) - UTILITY::dist2ScaleInv(sonar_y_pos.returnLastDistance(), minDist, maxDist))  * PI/180;
          error.theta += repulsion_factor*(UTILITY::dist2ScaleInv(sonar_x_pos.returnLastDistance(), minDist, maxDist) - UTILITY::dist2ScaleInv(sonar_x_neg.returnLastDistance(), minDist, maxDist))  * PI/180;
     }
 
     error.psi       =     (-imu_data.psi  + desired_angles.psi) * PI/180;
-    /*if(ncurse)clear();
-    printf("error.psi(desired_psi - imu_psi) , %3.3f  imu_data.psi %3.3f, desired_angles.psi %3.3f\n", error.psi, imu_data.psi, desired_angles.psi);
-    printf("error.theta(desired_psi - imu_theta) , %3.3f  imu_data.theta %3.3f, desired_angles.theta %3.3f\n", error.theta, imu_data.theta, desired_angles.theta);
-    if(ncurse)refresh();
-    */
     error.phi_dot   =                           (-imu_data.phi_dot) * PI/180;
     error.theta_dot =                         (-imu_data.theta_dot) * PI/180;
     error.psi_dot   =                           (-imu_data.psi_dot) * PI/180;
+   
+    
+   
+    error.altitude_calibrated     =     desired_altitude 	 - imu_data.altitude_calibrated;
+    error.altitude_deriv 	  =     desired_altitude_deriv - imu_data.altitude_deriv;
+    
+    altitude_integral_error 	  +=  error.altitude_calibrated*.03;
+    if(altitude_integral_error >=  10) altitude_integral_error = 10;
+
+    error.altitude_integral 	  +=    error.altitude_calibrated;
+
+
     return error;
 }
 Control_command thrust(const State& imu_error, const State_Error& vicon_error, const Control_command& U_trim, const int joystick_thrust, const Gains& gains){
     //calculate thrust and acceleration
     Control_command U = {0};
     
-    if(VICON_OR_JOY == 1){
+    if(VICON_OR_JOY == 1) //VICON
+    {
     	 int calc_thrust = (int) (-(gains.kp_z * vicon_error.z.prop)  -  (gains.kd_z * vicon_error.z.deriv) - (gains.ki_z * vicon_error.z.integral));
-    	 U.thrust        =  calc_thrust + U_trim.thrust; }
-    else{
-	//U.thrust        =  floor(joystick_thrust * (4) ) + U_trim.thrust; //thrust from joystick
+    	 U.thrust        =  calc_thrust + U_trim.thrust; 
+    }
+    else if(VICON_OR_JOY != 1) //JOYSTICK
+    {
 	U.thrust        = 4 * joystick_thrust  + U_trim.thrust;
     }
+    else if(AUTO_HEIGHT) //AUTOHEIGHT
+    {
+        U.thrust += U_trim.thrust + gains.kp_altitude*imu_error.altitude_calibrated + gains.kd_altitude*imu_error.altitude_deriv + gains.ki_altitude*imu_error.altitude_integral;
+    }
+
+    if(SONAR_BUBBLE_DOWN)
+    {
+	U.thrust += repulsion_factor_down*UTILITY::dist2ScaleInv(sonar_down.returnLastDistance(), minDistDown, maxDistDown);
+    }
+
+    if(SONAR_BUBBLE_UP)
+    {
+        U.thrust -= repulsion_factor_up*UTILITY::dist2ScaleInv(sonar_up.returnLastDistance(), minDistUp, maxDistUp); 
+    }
+
+    
  	
     U.roll_acc  =  (gains.kp_phi   * imu_error.phi  )  +  (gains.kd_phi   * imu_error.phi_dot  )  + U_trim.roll_acc;
     U.pitch_acc =  (gains.kp_theta * imu_error.theta)  +  (gains.kd_theta * imu_error.theta_dot)  + U_trim.pitch_acc;
@@ -354,19 +349,18 @@ Control_command thrust(const State& imu_error, const State_Error& vicon_error, c
     return U;
 }
 
-void set_forces(const Control_command& U, double Ct, double d){
+void distribute_forces(const Control_command& U, double Ct, double d, double &force_m1, double &force_m2, double &force_m3, double &force_m4){
       //calculate forces from thrusts and accelerations
-    
+
+  //printf("thrust: %i, U.trim: %i, yaw_acc: %f, pitch_acc: %f, Ct: %f, d: %f \n", U.thrust,U_trim.thrust, U.yaw_acc, U.pitch_acc, Ct, d);
   if(!XConfig)
     {//this is Plus Configuration
-        double force_1 = (U.thrust/4 - (U.yaw_acc /(4*Ct)) + (U.pitch_acc /  (2*d)));
-        double force_2 = (U.thrust/4 + (U.yaw_acc /(4*Ct)) - (U.roll_acc  /  (2*d)));
-        double force_3 = (U.thrust/4 - (U.yaw_acc /(4*Ct)) - (U.pitch_acc /  (2*d)));
-        double force_4 = (U.thrust/4 + (U.yaw_acc /(4*Ct)) + (U.roll_acc  /  (2*d)));
-        motor_1.set_force( round(force_1), CONTROLLER_RUN );
-        motor_2.set_force( round(force_2), CONTROLLER_RUN );
-        motor_3.set_force( round(force_3), CONTROLLER_RUN );
-        motor_4.set_force( round(force_4), CONTROLLER_RUN );
+	
+        force_m1 = (U.thrust/4 - (U.yaw_acc /(4*Ct)) + (U.pitch_acc /  (2*d)));
+        force_m2 = (U.thrust/4 + (U.yaw_acc /(4*Ct)) - (U.roll_acc  /  (2*d)));
+        force_m3 = (U.thrust/4 - (U.yaw_acc /(4*Ct)) - (U.pitch_acc /  (2*d)));
+        force_m4 = (U.thrust/4 + (U.yaw_acc /(4*Ct)) + (U.roll_acc  /  (2*d)));
+        
     }
       else
     {  
@@ -379,18 +373,30 @@ void set_forces(const Control_command& U, double Ct, double d){
         
         double x_param = sqrt(2)/2;
         
-        double x1 = x_param * (force_1 + force_2)-(U.yaw_acc/(4*Ct));
-        double x2 = x_param * (force_2 + force_3)+(U.yaw_acc/(4*Ct));
-        double x3 = x_param * (force_3 + force_4)-(U.yaw_acc/(4*Ct));
-        double x4 = x_param * (force_4 + force_1)+(U.yaw_acc/(4*Ct));
-            
-        motor_1.set_force( round(x1), CONTROLLER_RUN );
-        motor_2.set_force( round(x2), CONTROLLER_RUN );
-        motor_3.set_force( round(x3), CONTROLLER_RUN );
-        motor_4.set_force( round(x4), CONTROLLER_RUN );
+        force_m1 = x_param * (force_1 + force_2)-(U.yaw_acc/(4*Ct));
+        force_m2 = x_param * (force_2 + force_3)+(U.yaw_acc/(4*Ct));
+        force_m3 = x_param * (force_3 + force_4)-(U.yaw_acc/(4*Ct));
+        force_m4 = x_param * (force_4 + force_1)+(U.yaw_acc/(4*Ct));
+       
     }
-
+	//printf("Dist: force_m1: %f, force_m2: %f, force_m3: %f, force_m4: %f \n", force_m1, force_m2, force_m3, force_m4);
 }
+
+int send_forces(double force_m1, double force_m2, double force_m3, double force_m4)
+{
+	int m1 = motor_1.send_motor_data( round(force_m1), CONTROLLER_RUN);
+	int m2 = motor_2.send_motor_data( round(force_m2), CONTROLLER_RUN);
+	int m3 = motor_3.send_motor_data( round(force_m3), CONTROLLER_RUN);
+	int m4 = motor_4.send_motor_data( round(force_m4), CONTROLLER_RUN);
+
+	//printf("Send: force_m1: %i, force_m2: %i, force_m3: %i, force_m4: %i \n", motor_1.get_force(), motor_2.get_force(), motor_3.get_force(), motor_4.get_force());
+
+
+	if (m1 || m2 || m3 || m4) return 1;
+	else			  return 0;
+}
+
+
 
 Vicon vicon_velocity(Vicon& current, Vicon& old){
     
@@ -406,29 +412,37 @@ Vicon vicon_velocity(Vicon& current, Vicon& old){
     return velocity;    
 }
 
-void log_data(const Distances& sonar_distances, const float& dt, const Vicon& new_vicon, const Vicon& new_vicon_vel, const Vicon& new_filt_vicon, const Vicon& new_filt_vicon_vel, const State_Error& vicon_error, const State& imu_data, const State& imu_error, const Angles& desired_angles){
+void log_data(const Distances& sonar_distances, const float& dt, const State_Error& vicon_error, const State& imu_data, const State& imu_error, const Angles& desired_angles, const int thrust){
 
-    Data_log d;
-    d.dt   = dt;
-    d.vicon_data      = new_vicon;
-    d.vicon_vel       = new_vicon_vel;
-    d.vicon_data_filt = new_filt_vicon;
-    d.vicon_vel_filt  = new_filt_vicon_vel;
-    d.vicon_error     = vicon_error;
-    d.imu             = imu_data;
-    d.imu_error       = imu_error;
-    d.forces.motor_1  = *(motor_1.get_force());
-    d.forces.motor_2  = *(motor_2.get_force());
-    d.forces.motor_3  = *(motor_3.get_force());
-    d.forces.motor_4  = *(motor_4.get_force());
-    d.desired_angles  = desired_angles;
-    	Distances sonarDist;
-	
+	Data_log d;
+	d.dt   = dt;
+
+	if(VICON_OR_JOY > 0)
+	{
+	    d.vicon_data      = xbee.getLastVicon();
+	    d.vicon_vel       = xbee.getLastViconVel();
+	    d.vicon_data_filt = xbee.getLastFiltVicon();
+	    d.vicon_vel_filt  = xbee.getLastViconVel();
+	}
+
+	d.vicon_error     = vicon_error;
+	d.imu             = imu_data;
+	d.imu_error       = imu_error;
+	d.forces.motor_1  = motor_1.get_force();
+	d.forces.motor_2  = motor_2.get_force();
+	d.forces.motor_3  = motor_3.get_force();
+	d.forces.motor_4  = motor_4.get_force();
+	d.thrust	  = thrust;
+	d.desired_angles  = desired_angles;
+	Distances sonarDist;
+
 	sonarDist.x_pos = sonar_x_pos.returnLastDistance();
 	sonarDist.x_neg = sonar_x_neg.returnLastDistance();
 	sonarDist.y_pos = sonar_y_pos.returnLastDistance();
 	sonarDist.y_neg = sonar_y_neg.returnLastDistance();
-    	//printf(" x_pos) %i, x_neg) %i, y_pos) %i y_neg) %i \n",sonarDist.x_pos, sonarDist.x_neg, sonarDist.y_pos, sonarDist.y_neg);
+	sonarDist.down = sonar_down.returnLastDistance();
+	sonarDist.up = sonar_up.returnLastDistance();
+	//printf(" x_pos) %i, x_neg) %i, y_pos) %i y_neg) %i \n",sonarDist.x_pos, sonarDist.x_neg, sonarDist.y_pos, sonarDist.y_neg);
 	d.sonar_distances = sonarDist;
 
 	RepForces scales;
@@ -436,16 +450,18 @@ void log_data(const Distances& sonar_distances, const float& dt, const Vicon& ne
 	scales.x_neg = repulsion_factor*UTILITY::dist2ScaleInv(sonar_x_neg.returnLastDistance(), minDist, maxDist);
 	scales.y_pos = repulsion_factor*UTILITY::dist2ScaleInv(sonar_y_pos.returnLastDistance(), minDist, maxDist);
 	scales.y_neg = repulsion_factor*UTILITY::dist2ScaleInv(sonar_y_neg.returnLastDistance(), minDist, maxDist);
+	scales.down  = repulsion_factor_down*UTILITY::dist2ScaleInv(sonar_down.returnLastDistance(), minDistDown, maxDistDown);
+	scales.up    = repulsion_factor_up  *UTILITY::dist2ScaleInv(sonar_up.returnLastDistance(), minDistUp, maxDistUp);
 	d.scales = scales;
 
 	
     logger.log(d);
 }
 
-void display_info(const Distances& sonar_distances, const int succ_read,  const State& imu_data, const State_Error& vicon_error, const State& imu_error, const Control_command& U, const Vicon& vicon, const Vicon& vicon_filt, const Vicon& vicon_vel, const Vicon& vicon_vel_filt, const Angles& desired_angles,const int  joystick_thrust, const int  flight_mode, const Times& times, const Times& time_m){
+void display_info(const Distances& sonar_distances, const int succ_read,  const State& imu_data,  const State& imu_error, const State_Error& vicon_error, const Control_command& U, const Angles& desired_angles,const int  joystick_thrust, const int  flight_mode, const Times& times, const Times& time_m){
     
     display_count++;
-    if(! ( (display_count % 200) == 0) ) return;
+    if(! ( (display_count % 10) == 0) ) return;
  
     if(ncurse)clear();//function in curses library  
    
@@ -453,14 +469,24 @@ void display_info(const Distances& sonar_distances, const int succ_read,  const 
         printf("        System Flags    \n");
 	printf("CONTROLLER_RUN = "); printf(CONTROLLER_RUN ? "true\n" : "false\n");
 	printf("SYSTEM_RUN = "); printf(SYSTEM_RUN ? "true\n" : "false\n");
+	printf("BUBBLE_SIDES = "); printf(SONAR_BUBBLE_SIDES ? "true\n" : "false\n");
+	printf("BUBBLE_UP = "); printf(SONAR_BUBBLE_UP ? "true\n" : "false\n");
+	printf("BUBBLE_DOWN = "); printf(SONAR_BUBBLE_DOWN ? "true\n" : "false\n");
+	printf("AUTO_HEIGHT = "); printf(AUTO_HEIGHT ? "true\n" : "false\n");
+
+
 	printf("\n\n");
 
         printf("        IMU DATA (degrees)    \n");
-        printf("Last read success? %i \n", imu_data.succ_read);
+        if(MAGN) printf("(Using Magnetometer Psi)\n");
+	else 	 printf("Using Gyro Integration Psi\n");
+	printf("Read Frequency: %f \n", 1/imu_data.dt);
         printf("phi:   %7.2f         phi dot:   %7.2f \n",imu_data.phi, imu_data.phi_dot);//, imu_data.phi, imu_data.phi_dot);
         printf("theta: %7.2f         theta dot: %7.2f\n",imu_data.theta, imu_data.theta_dot);
-        printf("psi:   %7.2f         psi dot:   %7.2f    psi uncal:   %7.2f\n\n",imu_data.psi, imu_data.psi_dot, imu_data.psi_contin);
-    
+        printf("psi_gyro:   %7.2f    psi dot:     %7.2f \n\n",imu_data.psi_gyro_integration, imu_data.psi_dot);
+    	printf("psi_magn:   %7.2f    psi uncal:   %7.2f\n\n",  imu_data.psi_magn_continuous_calibrated, imu_data.psi_magn_continuous);
+	printf("altitude:   %7.2f    altitude_deriv:   %7.2f\n\n", imu_data.altitude_calibrated,  imu_data.altitude_deriv); 
+
 /*
    
 	printf("        VICON DATA                                                          FILTERED VICON DATA   \n");
@@ -469,6 +495,7 @@ void display_info(const Distances& sonar_distances, const int succ_read,  const 
         printf("psi:      %10.2f       z: %10.2f                           psi:   %10.2f       z: %10.2f\n\n",vicon.psi, vicon.z, vicon_filt.psi, vicon_filt.z);
       
     printf("        VICON VELOCITY                                                      FILTERED VICON VELOCITY  \n");
+g_da
 printf("phi_dot:  %10.2f       x_dot: %10.2f                  phi_dot:   %10.2f      x_dot: %10.2f\n", vicon_vel.phi, vicon_vel.x,  vicon_vel_filt.phi, vicon_vel_filt.x);
 printf("theta_dot:%10.2f       y_dot: %10.2f                  theta_dot: %10.2f      y_dot: %10.2f\n",vicon_vel.theta, vicon_vel.y, vicon_vel_filt.theta, vicon_vel_filt.y);
 printf("psi_dot:  %10.2f       z_dot: %10.2f                  psi_dot:   %10.2f      z_dot: %10.2f\n\n",vicon_vel.psi, vicon_vel.z ,vicon_vel_filt.psi, vicon_vel_filt.z);
@@ -487,11 +514,15 @@ printf("psi_dot:  %10.2f       z_dot: %10.2f                  psi_dot:   %10.2f 
       
      printf("        JOYSTICK DATA\n ");
 	if(flight_mode < 11) printf("Flight Mode: OFF %i \n", flight_mode);
-        printf("Last read success? %i  freq: %f \n", succ_read, 1/joystick.getDt());
+        printf("Last read (sec)? %f  freq: %f \n", xbee.timeSinceLastRead(), 1/xbee.getDt());
         printf("phi: %.2f         theta: %.2f      psi: %.2f \n",  desired_angles.phi, desired_angles.theta, desired_angles.psi);
-        printf("flight_mode: %i  joystick_thrust:  %i \n\n",flight_mode, joystick_thrust);
+        printf("flight_mode: %i  joystick_thrust:  %i \n",flight_mode, joystick_thrust);
+	printf("Bubble Mode: "); 
+	if ( (flight_mode > 17.0) && (flight_mode < 19.0)) printf("ON \n\n"); 
+	else 						   printf("OFF \n\n");
+	
 
-/*
+
     printf("        THRUST \n");
         printf("U_trim: %i, joystick: %i \n\n", U_trim.thrust, joystick_thrust);   
       
@@ -509,7 +540,8 @@ printf("psi_dot:  %10.2f       z_dot: %10.2f                  psi_dot:   %10.2f 
         printf("yaw   (psi)  :      %f\n\n", U.yaw_acc);    
      //   printf("U.yaw_acc %3.3f  =  (gains.kp_psi %3.3f   * imu_error.psi %3.3f  )  +  (gains.kd_psi %3.3f  * imu_error.psi_dot %3.3f  ) \n", 
        //                 U.yaw_acc, gains.kp_psi, imu_error.psi, gains.kd_psi, imu_error.psi_dot);
-     
+ 
+/*    
     printf("          GAINS \n");
         printf("Theta: KP %10.2f KD: %10.2f \n", gains.kp_theta, gains.kd_theta);
         printf("Phi: KP %10.2f KD: %10.2f \n", gains.kp_phi, gains.kd_phi);
@@ -525,28 +557,48 @@ printf("psi_dot:  %10.2f       z_dot: %10.2f                  psi_dot:   %10.2f 
 
  
     printf("        FORCES (0-255)     \n");
-        printf("motor_1: %i  ", *(motor_1.get_force()));
-        printf("motor_2: %i  ", *(motor_2.get_force()));
-        printf("motor_3: %i  ", *(motor_3.get_force()));
-        printf("motor_4: %i \n\n", *(motor_4.get_force()));
+        printf("motor_1: %i, freq: %f  ",    motor_1.get_force(),  1/motor_1.getDt() );
+        printf("motor_2: %i, freq: %f  ",    motor_2.get_force(),  1/motor_2.getDt() );
+        printf("motor_3: %i, freq: %f  ",    motor_3.get_force(),  1/motor_3.getDt() );
+        printf("motor_4: %i, freq: %f \n\n", motor_4.get_force(), 1/motor_4.getDt() );
 
-/*
+
     printf("        TIME INFO     \n");
-        printf("Controller timestep (s)       :     %7.4f\n", tv2float(times.delta));
-        printf("Controller loop frequency (Hz):     %5.3f\n", 1/tv2float(times.delta));
-        printf("Motor loop frequency (Hz)     :    %5.3f\n", 1/tv2float(time_m.delta));
-       // printf("%lld.%.9ld", (long long)times.current.tv_sec, times.current.tv_nsec);
-        printf("Time Date                     :    %s\n ", times.date_time);
+        printf("Controller timestep (s)       :     %7.4f\n", timerController.getDt());
+        printf("Controller loop frequency (Hz):     %5.3f\n", 1/timerController.getDt());
+
+
+	float x_pos_repulsion = repulsion_factor*UTILITY::dist2ScaleInv(sonar_x_pos.returnLastDistance(), minDist, maxDist);
+	float x_neg_repulsion = repulsion_factor*UTILITY::dist2ScaleInv(sonar_x_neg.returnLastDistance(), minDist, maxDist);
+	float y_pos_repulsion = repulsion_factor*UTILITY::dist2ScaleInv(sonar_y_pos.returnLastDistance(), minDist, maxDist);
+	float y_neg_repulsion = repulsion_factor*UTILITY::dist2ScaleInv(sonar_y_neg.returnLastDistance(), minDist, maxDist);
+	float down_repulsion = repulsion_factor*UTILITY::dist2ScaleInv(sonar_down.returnLastDistance(), minDist, maxDist);
+	float up_repulsion = repulsion_factor*UTILITY::dist2ScaleInv(sonar_up.returnLastDistance(), minDist, maxDist);	
+/*
+	printf("        Sonar:      \n");
+	printf("SONAR_BUBBLE_SIDES = "); printf(SONAR_BUBBLE_SIDES ? "ON\n" : "OFF\n");
+	if(sonar_x_pos.getStatus()) printf("X+: ON, freq: %f,  distance: %i, repulsive_scale [0,%i] %f \n", x_pos.succ_read, 1/sonar_x_pos.getDt(),  sonar_x_pos.returnLastDistance(), repulsion_factor, x_pos_repulsion); 
+	else printf("X+: OFF, last_read (sec): %f, distance: %i, repulsive_scale [0,%i] \n", sonar_x_pos.timeSinceLastRead(),sonar_x_pos.returnLastDistance(), x_pos_repulsion);
+ 	
+	if(sonar_x_neg.getStatus()) printf("X-: ON, freq: %f,  distance: %i, repulsive_scale [0,%i] %f \n", x_neg.succ_read, 1/sonar_x_neg.getDt(),  sonar_x_neg.returnLastDistance(), repulsion_factor,x_neg_repulsion);
+        else printf("X-: OFF, last_read (sec): %f, distance: %i, repulsive_scale [0,%i] %f  \n", sonar_x_neg.timeSinceLastRead(),sonar_x_neg.returnLastDistance(), x_neg_repulsion);
+
+	if(sonar_y_pos.getStatus()) printf("Y+: ON, freq: %f,  distance: %i, repulsive_scale [0,%i] %f \n", y_pos.succ_read, 1/sonar_y_pos.getDt(),  sonar_y_pos.returnLastDistance(), repulsion_factor, y_pos_repulsion);
+        else printf("Y+: OFF, last_read (sec): %f, distance: %i, repulsive_scale [0,%i] %f \n", sonar_x_pos.timeSinceLastRead(),  sonar_y_pos.returnLastDistance(), y_pos_repulsion);
+
+	 if(sonar_y_neg.getStatus()) printf("Y-: ON, freq: %f,  distance: %i, repulsive_scale [0,%i] %f \n", y_neg.succ_read, 1/sonar_y_neg.getDt(),  sonar_y_neg.returnLastDistance(), repulsion_factor,y_neg_repulsion);
+        else printf("Y-: OFF, last_read (sec): %f distance: %i, repulsive_scale [0,%i] %f \n\n", sonar_y_neg.timeSinceLastRead(), sonar_y_neg.returnLastDistance(), y_neg_repulsion);
+
+        printf("SONAR_BUBBLE_DOWN = "); printf(SONAR_BUBBLE_DOWN ? "ON,  " : "OFF,  ");
+        printf("SONAR_BUBBLE_UP = "); printf(SONAR_BUBBLE_UP ? "ON\n" : "OFF\n");
+	if(sonar_down.getStatus()) printf("DOWN: ON, freq: %f,  distance: %i, repulsive_scale [0,%i] %f \n", down.succ_read, 1/sonar_down.getDt(),  sonar_down.returnLastDistance(), repulsion_factor, down_repulsion);
+        else printf("DOWN: OFF, last_read (sec): %f, distance: %i, repulsive_scale [0,%i] %f \n", sonar_down.timeSinceLastRead(), sonar_down.returnLastDistance(), down_repulsion );
+
+	if(sonar_up.getStatus()) printf("UP:   ON, freq: %f,  distance: %i, repulsive_scale [0,%i] %f \n", up.succ_read, 1/sonar_up.getDt(),  sonar_up.returnLastDistance(), repulsion_factor,up_repulsion);
+        else printf("UP: OFF, last_read (sec): %f, distance: %i, repulsive_scale [0,%i] %f \n", sonar_up.timeSinceLastRead(), sonar_up.returnLastDistance(), up_repulsion);
+
 */
-
-
-	printf("        Sonar: Distance (300 mm -5000 mm) and Frequency (Hz)     \n");
-	printf("X+) succ_read: %i, freq: %f, distance: %i, repulsive_scale [0,1] %f \n", x_pos.succ_read, 1/sonar_x_pos.getDt(), sonar_x_pos.returnLastDistance(), repulsion_factor*UTILITY::dist2ScaleInv(sonar_x_pos.returnLastDistance(), minDist, maxDist));  
-	printf("X-) succ_read: %i, freq: %f, distance: %i, repulsive_scale [0,1] %f \n", x_neg.succ_read, 1/sonar_x_neg.getDt(), sonar_x_neg.returnLastDistance(), repulsion_factor*UTILITY::dist2ScaleInv(sonar_x_neg.returnLastDistance(), minDist, maxDist));
-	printf("Y+) succ_read: %i, freq: %f, distance: %i, repulsive_scale [0,1] %f \n", y_pos.succ_read, 1/sonar_y_pos.getDt(), sonar_y_pos.returnLastDistance(), repulsion_factor*UTILITY::dist2ScaleInv(sonar_y_pos.returnLastDistance(), minDist, maxDist));
-	printf("Y-) succ_read: %i, freq: %f, distance: %i, repulsive_scale [0,1] %f  \n", y_neg.succ_read, 1/sonar_y_neg.getDt(),sonar_y_neg.returnLastDistance(), repulsion_factor*UTILITY::dist2ScaleInv(sonar_y_neg.returnLastDistance(), minDist, maxDist));
 	if(ncurse)refresh();//refreshes shell console to output this text
-
 
 
 }
@@ -559,16 +611,16 @@ void *command_input(void *thread_id){
     string input;
 
     while(SYSTEM_RUN) {
-	    printf("    please give input for command_input: ");
+	    //printf(" give input for command_input: ");
         //command = getchar(); 
         //getline(cin, input);
         command = getch();
-        printf("input: %i \n", command);
+        //printf("input: %i \n", command);
         switch (command) {
             case '1':
 
             case '4':
-                start_motors();
+               // start_motors();
                 break;
                 
             case '5':
@@ -746,109 +798,91 @@ void *command_input(void *thread_id){
     pthread_exit(NULL);
 }
 void configure_threads(void){
-    //pthread_t - is an abstract datatype that is used as a handle to reference the thread
-     //threads[0] = control_stabilizer
-     //threads[1] = motor_signal
-     //threads[2] = command_input
+	//pthread_t - is an abstract datatype that is used as a handle to reference the thread
+	//threads[0] = control_stabilizer
+	//threads[1] = motor_signal
+	//threads[2] = command_input
 
-    pthread_t threads[NUM_THREADS];
-    //Special Attribute for starting thread
-    pthread_attr_t attr;
-    //sched_param is a structure that maintains the scheduling parameters
-        //sched_param.sched_priority  - an integer value, the higher the value the higher a thread's proiority for scheduling
-    struct sched_param param;
-    int fifo_max_prio, fifo_min_prio;
-    
-    // system("clear");
-     //printf("INSIDE CONFIGURE_THREADS\n");
-     	//if(ncurse)refresh();
-     // Set thread attributes: FIFO scheduling, Joinable
-     // the sched_param.sched_priorirty is an int that must be in [min,max] for a certain schedule policy, in this case, SCHED_FIFO
-     pthread_attr_init(&attr);
-     pthread_attr_setschedpolicy(&attr, SCHED_FIFO);
-     pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_JOINABLE);
-     fifo_max_prio = sched_get_priority_max(SCHED_FIFO);
-     fifo_min_prio = sched_get_priority_min(SCHED_FIFO); 
+	pthread_t threads[NUM_THREADS];
+	//Special Attribute for starting thread
+	pthread_attr_t attr;
+	//sched_param is a structure that maintains the scheduling parameters
+	//sched_param.sched_priority  - an integer value, the higher the value the higher a thread's proiority for scheduling
+	struct sched_param param;
+	int fifo_max_prio, fifo_min_prio;
 
-     	// create threads
-     
-     printf("=> creating control_stabilizer thread\n");
-     //	if(ncurse)refresh();
-     // Higher priority for filter
-     param.sched_priority = fifo_max_prio;
-     pthread_attr_setschedparam(&attr, &param);
-     pthread_create(&threads[0], &attr, control_stabilizer, (void *) 0);
-     usleep(onesecond);
-  
-     printf("=> creating motor_signal thread\n");
-     	//if(ncurse)refresh();
-     // Medium priority for motor_signal
-     param.sched_priority = (fifo_max_prio+fifo_min_prio)/2;
-     pthread_attr_setschedparam(&attr, &param);
-     pthread_create(&threads[1], &attr, motor_signal, (void *) 1);
-//	usleep(onesecond);
-//	printf("final usleep done");
-
-     printf("=> creating command_input thread\n");
+	// system("clear");
+	//printf("INSIDE CONFIGURE_THREADS\n");
 	//if(ncurse)refresh();
-     // Lower priority for commmand input
-     param.sched_priority = (fifo_max_prio+fifo_min_prio)/2;
-     pthread_attr_setschedparam(&attr, &param);
-     pthread_create(&threads[2], &attr, command_input, (void *) 2);
-    
+	// Set thread attributes: FIFO scheduling, Joinable
+	// the sched_param.sched_priorirty is an int that must be in [min,max] for a certain schedule policy, in this case, SCHED_FIFO
+	pthread_attr_init(&attr);
+	pthread_attr_setschedpolicy(&attr, SCHED_FIFO);
+	pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_JOINABLE);
+	fifo_max_prio = sched_get_priority_max(SCHED_FIFO);
+	fifo_min_prio = sched_get_priority_min(SCHED_FIFO); 
 
-     // Wait for all threads to complete
-       for (int i = 0; i < NUM_THREADS; i++)  {  
-	   //calling join will block this main thread until every thread exits
-         pthread_join(threads[i], NULL);
-        }
+	// create threads
 
-     printf("EXITING CONFIGURE_THREADS\n");
-     close(usb_imu_ivn);
-    
-     pthread_attr_destroy(&attr);
+	printf("=> creating control_stabilizer thread\n");
+	if(ncurse)refresh();
+	// Higher priority for filter
+	param.sched_priority = fifo_max_prio;
+	pthread_attr_setschedparam(&attr, &param);
+	pthread_create(&threads[0], &attr, control_stabilizer, (void *) 0);
+	usleep(onesecond);
+
+	printf("=> creating command_input thread\n");
+	if(ncurse)refresh();
+	// Lower priority for commmand input
+	param.sched_priority = (fifo_max_prio+fifo_min_prio)/2;
+	pthread_attr_setschedparam(&attr, &param);
+	pthread_create(&threads[2], &attr, command_input, (void *) 2);
+
+
+	// Wait for all threads to complete
+	for (int i = 0; i < NUM_THREADS; i++)  
+	{  
+	//calling join will block this main thread until every thread exits
+	pthread_join(threads[i], NULL);
+	}
+
+	printf("EXITING CONFIGURE_THREADS\n");
+	if(ncurse)refresh(); 
+	close(usb_imu_ivn);
+
+	pthread_attr_destroy(&attr);
 }
 void init(void)
 {
-    //ncurses
-    if(ncurse) initscr();
+	usleep(onesecond*2);
+	//ncurses
+	if(ncurse) initscr();
 
-   //finds bias in gyro and checks for out of range imu values. returns 1 if bad imu values.
-   printf("finding gyro bias...\n");  
-   //if(ncurse)refresh();
-   if(imu.calibrate() == 1) ;
-   else CONTROLLER_RUN = false;
-   //if(ncurse)refresh();
-	
-printf("joystick.check_start_thrust() %i \n", joystick.check_start_thrust());
-/*
-   if(!VICON_OR_JOY)
-   {
-	if(joystick.check_start_thrust() > 0) CONTROLLER_RUN = true;
-	else				      CONTROLLER_RUN = false;
+	//finds bias in gyro and checks for out of range imu values. returns 1 if bad imu values.
+	printf("finding gyro bias...\n");  
+	if(ncurse)refresh();
+	if(imu.calibrate() == 1) ;
+	else CONTROLLER_RUN = false;
+	if(ncurse)refresh();
 
-	printf("CONTROLLER_RUN: %i\n\n", CONTROLLER_RUN);
-	//if(ncurse)refresh();
-   }
-*/
-   set_gains(gains);
-   set_initial_times(times);
-   set_initial_times(times_display);
+	printf("xbee.check_start_thrust() %i \n", xbee.check_start_thrust());
+
+	set_gains(gains);
+	set_initial_times(times);
+	set_initial_times(times_display);
 }
 
 int main(void)
 {
 	//intialize desired angles, gains, U_trim, & open port ot xbee and imu
 	init();
-	
+	usleep(onesecond*2);
 	//if(ncurse)clear();
-	printf("in main \n"); //if(ncurse)refresh();
-	
-	start_motors();
 
 	configure_threads();
-
 	usleep(onesecond*2);
+
 	//if(ncurse)clear();
 	if(ncurse) endwin();
 

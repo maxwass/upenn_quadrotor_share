@@ -1,31 +1,3 @@
-/*
-Copyright (c) <2015>, <University of Pennsylvania:GRASP Lab>                                                             
-All rights reserved.
- 
-Redistribution and use in source and binary forms, with or without
-modification, are permitted provided that the following conditions are met:
-   * Redistributions of source code must retain the above copyright
-     notice, this list of conditions and the following disclaimer.
-   * Redistributions in binary form must reproduce the above copyright
-     notice, this list of conditions and the following disclaimer in the
-      documentation and/or other materials provided with the distribution.
-    * Neither the name of the university of pennsylvania nor the
-      names of its contributors may be used to endorse or promote products
-      derived from this software without specific prior written permission.
-
-THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
-ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
-WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
-DISCLAIMED. IN NO EVENT SHALL UNIVERSITY OF PENNSYLVANIA  BE LIABLE FOR ANY
-DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
-(INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
-LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
-ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
-SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-
-*/
-
 //=================================
 // include guard
 #ifndef XBEE1_H
@@ -73,6 +45,10 @@ class Xbee {
         std::string PATH2XBEE;
 	int DATASIZE;
 
+	bool first_call = true;
+        bool xbeeStatus = true;
+        float xbeeTimeout = 0.6;
+
         bool foundFirstByte = false, foundLastByte = false;
         int index = 0;
 
@@ -81,10 +57,35 @@ class Xbee {
         fd_set read_fds;
         struct timeval no_timeout;
 
+	//position from raw data
+	Vicon new_vicon,          old_vicon,          old_old_vicon          = {0};
+	Vicon new_filt_vicon,     old_filt_vicon,     old_old_filt_vicon     = {0};
+
+	//velocity from raw data
+	Vicon new_vicon_vel,      old_vicon_vel,      old_old_vicon_vel      = {0};
+	Vicon new_filt_vicon_vel, old_filt_vicon_vel, old_old_filt_vicon_vel = {0};
+
+	Weights weights = {.7,.2,.1};
+
+
+
         public:
         Xbee(std::string PATH2XBEE, int DATASIZE);
         int open_port(std::string PATH2XBEE, int DATASIZE);
-        int get_xbee_data(Angles& joystick_des_angles, uint8_t& joystick_thrust, uint8_t& flight_mode);
+
+        int   get_xbee_data(void);
+	void  unpack_vicon_data(Vicon &vicon, float arr[]);
+	Vicon filter_vicon(Vicon& new_vicon, Weights& weights);
+	Vicon vicon_velocity(Vicon& current, Vicon& old, float dt);
+	void  pushback(Vicon& new_vicon, Vicon& old_vicon, Vicon& old_old_vicon);
+	void unpack_vicon_data(Vicon &vicon, uint8_t arr[]);
+	State_Error error_vicon(State_Error& error, const Vicon &desired_velocity, const Positions& desired_positions);	
+	Vicon getLastVicon(void);
+	Vicon getLastFiltVicon(void);
+	Vicon getLastViconVel(void);
+	Vicon getLastFiltViconVel(void);
+
+	int get_xbee_data(Angles& joystick_des_angles, uint8_t& joystick_thrust, uint8_t& flight_mode);
         int get_xbee_helper(Angles& joystick_des_angles, uint8_t& joystick_thrust, uint8_t& flight_mode);
         int checksum(const uint8_t arr[], int arr_length);
 	void print_raw_bytes(const uint8_t arr[], int arr_length);
@@ -95,6 +96,7 @@ class Xbee {
         void printStats(void);
         void print_raw_bytes(const char arr[], int arr_length);
         float calcDt(void);
+	float timeSinceLastRead(void);
 	float calcDt(timespec& oldT, timespec& newT);
         float getDt(void);
         void clean(void);

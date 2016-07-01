@@ -1,78 +1,33 @@
 #include "motor.h"
 //need sudo to run exec
+//#define MOTOR_PATH "/dev/i2c-10"
 
-/*
-Copyright (c) <2015>, <University of Pennsylvania:GRASP Lab>                                                             
-All rights reserved.
- 
-Redistribution and use in source and binary forms, with or without
-modification, are permitted provided that the following conditions are met:
-   * Redistributions of source code must retain the above copyright
-     notice, this list of conditions and the following disclaimer.
-   * Redistributions in binary form must reproduce the above copyright
-     notice, this list of conditions and the following disclaimer in the
-      documentation and/or other materials provided with the distribution.
-    * Neither the name of the university of pennsylvania nor the
-      names of its contributors may be used to endorse or promote products
-      derived from this software without specific prior written permission.
+motor::motor(std::string PATH2MOTOR, int motor_id, int i2c_address)
+{
+    printf("Motor object is being created, motor = %i \n ", motor_id);
+    this -> motor_id = motor_id;
+    this -> i2c_address = i2c_address;
+    
+    i2c_handle = open_i2c(PATH2MOTOR);
 
-THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
-ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
-WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
-DISCLAIMED. IN NO EVENT SHALL UNIVERSITY OF PENNSYLVANIA  BE LIABLE FOR ANY
-DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
-(INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
-LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
-ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
-SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+    ioctl(i2c_handle,I2C_SLAVE,i2c_address);
 
-*/
+}
 
+int motor::open_i2c(std::string PATH2MOTOR){
+    printf("opening i2c port...");
 
-#define MOTOR_PATH "/dev/i2c-10"
+    int handle = open(PATH2MOTOR.c_str(),O_RDWR);
 
-int motor::open_i2c(void){
-    cout << "opening i2c port...";
-    int handle = open(MOTOR_PATH,O_RDWR);
-
-    if (handle > 0) {cout << "Done!: file descriptor: " << handle << endl;}
-    else            {cout << "Fail to open port" << endl;}
+    if (handle > 0) printf("Done!: file descriptor: %i \n", handle);
+    else            printf("Fail to open port \n");
 
     return handle;
 }
-
-// Member functions definitions including constructor
-motor::motor(int motor_id, int i2c_address)
-{
-    cout << "Motor object is being created, motor = " << motor_id << endl;
-    this -> motor_id = motor_id;
-    this -> i2c_address = i2c_address;
-    i2c_handle = open_i2c();
-    send_force_i2c();
-}
-
-void motor::set_force( int force_in, bool CONTROLLER_RUN )
-{ //when setting force, check that ...
-    //the motors are allowed to run (CONTROLLER_RUN flag is true)
-    //the force is within acceptable bounds
-
-    //obtain lock
-   boost::unique_lock<boost::mutex> scoped_lock(mutex_force);
-    
-    if(CONTROLLER_RUN) force = ensure_valid_force(force_in);
-    else force = 0; 
-
-//           if(CONTROLLER_RUN) { 
-//        force = ensure_valid_force(force_in);
-//        send_force_i2c();
-//    }
-//    else{ shut_down(); }
-}
  
-uint8_t* motor::get_force( void )
-{  boost::unique_lock<boost::mutex> scoped_lock(mutex_force);
-   return &force;
+uint8_t  motor::get_force( void )
+{   
+	return force;
 }
 
 int motor::ensure_valid_force(int force_in)
@@ -83,36 +38,126 @@ int motor::ensure_valid_force(int force_in)
     return force_in;
 }
 
-int motor::which_motor(void){
+int motor::which_motor(void)
+{
 	return motor_id;
 }
 
-void motor::send_force_i2c(void){
-    //Input/Output control: send to i2c_address
-    ioctl(i2c_handle,I2C_SLAVE,i2c_address);
+void motor::send_force_i2c(bool CONTROLLER_RUN)
+{
+	//Input/Output control: send to i2c_address
+	ioctl(i2c_handle,I2C_SLAVE,i2c_address);
 
-    //write(int fd, const void *buf, size_t count)
-        //write() writes up to count bytes from the buffer 
-        //pointed buf to the file referred to by the file 
-        //descriptor fd.
-    //uint8_t f = this->get_force();
+	 uint8_t f = 0;
 
-    int success_write = write(i2c_handle, (this->get_force()), 1);//add &force back
+	if(CONTROLLER_RUN) f = this->get_force();
+	int success_write = write(i2c_handle, &f, 1);
 
-    if(success_write < 0) {
-        cout << "Failed to write to motor: " << motor_id << endl;
-    }
+	if(success_write < 0) printf("Failed to write to motor: %i \n", motor_id);  
+
+	
+	calcDt(oldT,newT);
+}
+int motor::send_motor_data(int force_in, bool CONTROLLER_RUN)
+{
+	// select returns the number of fd's ready
+	FD_ZERO(&write_fds);
+	FD_SET(i2c_handle, &write_fds);
+	no_timeout.tv_sec  = 0;
+	no_timeout.tv_usec = 0;
+
+
+	int num_fds = select(i2c_handle+1, NULL, &write_fds, NULL, &no_timeout);
+	int returnval = 0;
+	
+	if(first_call)
+	{
+		first_call = false;
+		clock_gettime(CLOCK_REALTIME,&oldT);
+	}
+
+	//No data ready to read
+	if(num_fds == 0)
+	{
+		returnval= -1;
+		//printf("No File_Descriptor Available to write! \n");
+		return -1;
+	}
+	//select returned an error
+	else if(num_fds ==-1)
+	{
+		returnval= -2;
+		return -2;
+	}
+	else if(num_fds ==1)
+	{
+		this->force = ensure_valid_force(force_in);
+    		
+		send_force_i2c(CONTROLLER_RUN);
+		returnval = num_fds;
+	}
+
+	
+
+	return returnval;
+
+
+}
+//timer functions
+float motor::calcDt(timespec& oldT, timespec& newT)
+{
+                //track dt between reads
+                clock_gettime(CLOCK_REALTIME, &newT);
+                float dt = UTILITY::timespec2float(UTILITY::time_diff(oldT, newT));
+                clock_gettime(CLOCK_REALTIME ,&oldT);
+                calc_dt = dt;
+                return dt;
+}
+
+float motor::getDt(void)
+{
+                return this->calc_dt;
+}
+
+float motor::timeSinceLastRead(void)
+{
+
+                timespec currentTime;
+                clock_gettime(CLOCK_REALTIME,&currentTime);
+                //printf("xbee time %f \n",UTILITY::timespec2float(UTILITY::time_diff(this->oldT, currentTime)));
+                return UTILITY::timespec2float(UTILITY::time_diff(this->oldT, currentTime));
 
 }
 
+/*
+int main(void)
+{	
+	timespec oldT, newT;
+  	float loop_dt;
+	clock_gettime(CLOCK_REALTIME,&oldT);
+        int returnVal;
+	motor motor1("/dev/i2c-10",1, 0x2c);
+	motor motor2("/dev/i2c-10",1, 0x29);
+	motor motor3("/dev/i2c-10",1, 0x2b);
+	motor motor4("/dev/i2c-10",1, 0x2a);
 
-int open_i2c(void){
-    cout << "opening i2c port...";
-    int handle = open(MOTOR_PATH,O_RDWR);
+	int i = 10;
 
-    if (handle > 0) {cout << "Done!: value is " << handle << endl;}
-    else            {cout << "Fail to open i2c port!" << endl;}
 
-    return handle;
+	while(1)
+	{
+		returnVal = motor1.send_motor_data(100,true);
+		returnVal = motor2.send_motor_data(50,true);
+		returnVal = motor3.send_motor_data(10,true);
+		returnVal = motor4.send_motor_data(0,true);
+
+
+		clock_gettime(CLOCK_REALTIME,&newT);
+		loop_dt = UTILITY::calcDt(oldT, newT);
+		
+		printf("returnVal: %i, loop frequency: %f, write frequency: %f, time since last read: %f  \n\n", returnVal, 1/loop_dt,1/motor1.getDt(), motor1.timeSinceLastRead());
+
+	}
+
 }
-
+*/

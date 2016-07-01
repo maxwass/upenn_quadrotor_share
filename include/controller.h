@@ -1,31 +1,3 @@
-/*
-Copyright (c) <2015>, <University of Pennsylvania:GRASP Lab>                                                             
-All rights reserved.
- 
-Redistribution and use in source and binary forms, with or without
-modification, are permitted provided that the following conditions are met:
-   * Redistributions of source code must retain the above copyright
-     notice, this list of conditions and the following disclaimer.
-   * Redistributions in binary form must reproduce the above copyright
-     notice, this list of conditions and the following disclaimer in the
-      documentation and/or other materials provided with the distribution.
-    * Neither the name of the university of pennsylvania nor the
-      names of its contributors may be used to endorse or promote products
-      derived from this software without specific prior written permission.
-
-THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
-ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
-WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
-DISCLAIMED. IN NO EVENT SHALL UNIVERSITY OF PENNSYLVANIA  BE LIABLE FOR ANY
-DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
-(INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
-LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
-ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
-SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-
-*/
-
 //=================================
 // include guard
 #ifndef CONTROLLER_H
@@ -43,6 +15,8 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "utility.h"
 #include "sonar.h"
 #include "xbee1.h"
+#include "timer.h"
+#include "altitude.h"
 
 #include <pthread.h>
 #include <stdlib.h>
@@ -77,8 +51,6 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 //#define printf(...) printw(__VA_ARGS__)
 //=================================
 
-double Ct=0.013257116418667*10;
-double d=0.169;
 //signal frequency = 1/frequency = frequency in Hz
 int onesecond = 1000000;
 int frequency = 200;
@@ -100,14 +72,14 @@ void start_motors(void);
 void stop_motors(void);
 void controller_on_off(bool& CONTROLLER_RUN);
 void display_on_off(bool& DISPLAY_RUN);
-State_Error error_vicon(State_Error& error, const Vicon& pos_filt, const Vicon& vel_filt, const Positions& desired_positions, const Times& times);
+int send_forces(double force_m1, double force_m2, double force_m3, double force_m4);
 void desired_angles_calc(Angles& desired_angles, const State_Error& error, const Gains& gains);
 State error_imu(const State& imu_data, const Angles& desired_angles);
 Control_command thrust(const State& imu_error, const State_Error& vicon_error, const Control_command& U_trim, const int joystick_thrust, const Gains& gains);
-void set_forces(const Control_command& U, double Ct, double d);
+void distribute_forces(const Control_command& U, double Ct, double d, double &force_m1, double &force_m2, double &force_m3, double &force_m4);
 Vicon vicon_velocity(Vicon& current, Vicon& old);
-void log_data(const Distances& sonar_distances, const float& dt, const Vicon& new_vicon, const Vicon& new_vicon_vel, const Vicon& new_filt_vicon, const Vicon& new_filt_vicon_vel, const State_Error& vicon_error, const State& imu_data, const State& imu_error, const Angles& desired_angles);
-void display_info(const Distances& sonar_distances, const int suc_read,  const State& imu_data, const State_Error& vicon_error, const State& imu_error, const Control_command& U, const Vicon& vicon, const Vicon& vicon_filt, const Vicon& vicon_vel, const Vicon& vicon_vel_filt, const Angles& desired_angles, const int joystick_thrust, const int flight_mode, const Times& times, const Times& time_m);
+void log_data(const Distances& sonar_distances, const float& dt, const State_Error& vicon_error, const State& imu_data, const State& imu_error, const Angles& desired_angles, const int thrust);
+void display_info(const Distances& sonar_distances, const int succ_read,  const State& imu_data,  const State& imu_error, const State_Error& vicon_error, const Control_command& U,  const Angles& desired_angles, const int joystick_thrust, const int flight_mode, const Times& times, const Times& time_m);
 void configure_threads(void);
 
 void set_timespec(timespec& x, timespec& y){
@@ -169,6 +141,9 @@ void set_gains(Gains& gains){
     gains.kd_z = 5.0;
     gains.ki_z = 5.0;
 
+    gains.kp_altitude = 20.0;
+    gains.kd_altitude = 20.0;
+    gains.ki_altitude = 0.0;
 }
 #endif 
 // __CONTROLLER_H_INCLUDED__

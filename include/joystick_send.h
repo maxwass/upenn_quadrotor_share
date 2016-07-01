@@ -1,3 +1,5 @@
+//Code for sending joystick data
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -5,12 +7,10 @@
 #include <math.h>
 #include <fcntl.h>
 #include <termios.h>
-#include <stdint.h>
 
 #define BAUDRATE B115200
 
-//this only for recieving two bytes!!!!
-int open_usbport_twobytes()
+int open_port()
 {
     struct termios newtio;
 	int port;
@@ -37,7 +37,7 @@ int open_usbport_twobytes()
        newtio.c_lflag = 0; // raw input
     
        //Time-Outs -- won't work with NDELAY option in the call to open
-       newtio.c_cc[VMIN]  = 2;   // block reading until RX x characers. If x = 0, it is non-blocking.
+       newtio.c_cc[VMIN]  = 24;   // block reading until RX x characers. If x = 0, it is non-blocking.
        newtio.c_cc[VTIME] = 0;   // Inter-Character Timer -- i.e. timeout= x*.1 s
     
        //Set local mode and enable the receiver
