@@ -1,0 +1,180 @@
+//=================================
+// include guard
+#ifndef PID
+#define PID
+
+#include "utility.h"
+#include "data_structs.h"
+#include "logger.h"
+#include "timer.h"
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+#include <sys/time.h>
+#include <time.h>
+#include <math.h>
+#include <fcntl.h>
+#include <termios.h>
+#include <stdint.h>
+using namespace std;
+
+class PIDController {
+	private:
+	bool first_call_ = true;
+	bool FLAG, LARGE_VALUE, SMALL_VALUE = false;
+	float maxAllowableValue_, minAllowableValue_ = 0.000;
+	float value_, valueOld_, valueDeriv_ = 0.0000;
+	float desiredValue_ = 0.00000;
+	float desiredValueDeriv_ = 0.00000;
+	float kp_, kd_, ki_ = 0.000;
+	float lastDt_ = 0.1000;
+	float propError_,propErrorOld_, derivError_, integError_ = 0.0000;
+	float maxIntegralError_ = 10.000;
+	float minValue_, maxValue_ = 0.0000;
+
+	public:
+	PIDController(float desired_value, float minAllowableValue, float maxAllowableValue)
+	{
+		setDesiredValue(desired_value);
+		minAllowableValue_  =  minAllowableValue;
+		maxAllowableValue_  =  maxAllowableValue;
+	}
+	void setGains(float kp, float kd, float ki)
+	{
+		kp_ = kp;
+		kd_ = kd;
+		ki_ = ki;
+	}
+	void printData(void)
+	{
+
+		
+	       printf("FLAG: %i, kp: %f, kd: %f, ki: %f \n", FLAG, kp_, kd_, ki_);
+	       printf("new value: %f, old value: %f, desiredValue_: %f, dt: %f, freq: %f \n", value_, valueOld_, getDesiredValue(), lastDt_, 1/lastDt_);
+	       printf("Calc: Error: desired value - new value : %f, Diff: Error:propError - propErrorOld: %f Deriv Error: (Diff Error)/dt %f \n", (getDesiredValue() -value_), (propError_ - propErrorOld_), (propError_ - propErrorOld_)/lastDt_);
+	       printf("Print: 				 Error : %f, 					             Deriv Error: %f, Integral Error: %f \n", propError_, derivError_, integError_);
+	       printf("Control Output: kp*propError: %f + kd*DerivError: %f: = %f \n\n",kp_*propError_, kd_*derivError_, this->getControlOutput());
+
+	}
+	void update(float valueNew, float dt)
+	{
+
+		if(first_call_)
+		{
+			first_call_ = false;
+			maxValue_ = valueNew;
+			minValue_ = valueNew;
+			lastDt_ = dt;
+			valueOld_ = value_;
+			value_ = valueNew;	
+		}		
+
+
+		if(valueNew >= maxValue_) maxValue_ = valueNew;
+		if(valueNew <= minValue_) minValue_ = valueNew;
+	
+
+	        //printf("old value: %f, new value: %f,  desiredValue_: %f, dt: %f, propError_: %f, derivError_: %f \n\n\n", value_, valueNew, getDesiredValue(), dt, desiredValue_-valueNew,  - (valueNew - value_)/dt);
+
+		lastDt_ = dt;
+		valueDeriv_ = (valueNew - value_)/dt;
+
+		propErrorOld_ = propError_;
+		propError_  =  getDesiredValue()      - valueNew;
+		derivError_ =  (propError_ - propErrorOld_)/dt;
+		integError_ += propError_*dt;
+		if(integError_ >=  maxIntegralError_) integError_   =  maxIntegralError_;
+		if(integError_ <= - maxIntegralError_) integError_   = -maxIntegralError_;
+ 		
+		valueOld_ = value_;
+		value_ = valueNew;
+		
+		if(valueNew > maxAllowableValue_) LARGE_VALUE = true;
+		else if(valueNew < minAllowableValue_) SMALL_VALUE = true; 
+		else 
+		{
+			LARGE_VALUE = false; 
+			SMALL_VALUE = false;
+		}
+
+	}
+	float getControlOutput(void)
+	{
+		if(FLAG)
+		{
+
+			if(LARGE_VALUE || SMALL_VALUE) return 0;
+			float  output = kp_*propError_ + kd_*derivError_;// + ki_*integError_;
+			if(output > 10) return 10.00;
+			else if(output < -10) return -10.00;
+
+			return output;
+		}
+		
+		else 	return 0;
+	}
+	float getMaxValue(void)
+	{
+		return maxValue_;
+	}
+	float getMinValue(void)
+        {
+                return minValue_;
+        }
+	void resetIntegral(void)
+	{
+		integError_ = 0.0;
+	}
+	void autoControlOff(void)
+	{
+		resetIntegral();
+		FLAG = false;
+	}
+	void autoControlOn(float desiredValue)
+        {
+		setDesiredValue(desiredValue);
+		//for smooth transition
+		valueOld_ = desiredValue;
+                resetIntegral();
+                FLAG = true;
+        }
+	bool isAutoControlOn(void)
+	{
+		return FLAG;
+	}
+	void setDesiredValue(float desiredValue)
+	{
+		
+		printf("  !!!!!!!!!CHANGING: before: %f   after:  %f !!!!!!\n\n\n", desiredValue_, desiredValue);
+		//usleep(1000000);
+		desiredValue_ = desiredValue;
+	}
+        float getValue(void)
+	{
+		return value_;
+	}
+	float getDesiredValue(void)
+        {
+                return desiredValue_;
+        }
+	float getValueDeriv(void)
+	{
+		return valueDeriv_;
+	}
+	float getPropError(void)
+	{	
+		return propError_;
+	}
+	float getDerivError(void)
+        {
+                return derivError_;
+        }
+	float getIntegralError(void)
+        {
+                return integError_;
+        }
+};
+
+#endif
+// __PID__

@@ -1,0 +1,12 @@
+float32 theta
+float32 phi
+float32 psi
+float32 psi_magn_continuous
+float32 psi_magn_continuous_calibrated
+float32 altitude_calibrated
+float32 theta_dot
+float32 phi_dot
+float32 psi_dot
+float32 psi_gyro_integration
+float32 dt
+int32 succ_read
